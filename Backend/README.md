@@ -4,7 +4,7 @@ A distributed, ultra-low-latency 2D Massively Multiplayer Online (MMO) backend w
 
 ---
 
-## 🏛️ Architecture Overview
+## Architecture Overview
 
 The backend is built as a modular, high-throughput **Cargo Workspace** dividing workloads into distinct Kubernetes services and shared crates:
 
@@ -54,7 +54,7 @@ Backend/
 
 ---
 
-## ⚡ The Three-Tiered State Pipeline
+## The Three-Tiered State Pipeline
 
 1. **Hot State (In-Memory RAM):**
    - Managed via sharded concurrent hash maps (`DashMap`) inside `game-server`.
@@ -69,7 +69,7 @@ Backend/
 
 ---
 
-## 🌐 Network Protocol Specifications
+## Network Protocol Specifications
 
 ### 1. Data Plane: High-Frequency Binary WebSockets (60 FPS)
 All packets begin with a 1-byte OpCode:
@@ -88,7 +88,7 @@ All packets begin with a 1-byte OpCode:
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 * Rust 1.82+ (`rustup toolchain install stable`)
@@ -118,7 +118,7 @@ cargo run -p worker
 
 ---
 
-## 🛠️ Cargo Workspace Aliases
+## Cargo Workspace Aliases
 
 Pre-configured in `.cargo/config.toml`:
 * `cargo c` -> `cargo check --workspace`
