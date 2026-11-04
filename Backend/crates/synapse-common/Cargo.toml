@@ -1,0 +1,20 @@
+[package]
+name = "synapse-common"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+config.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+metrics.workspace = true
+metrics-exporter-prometheus.workspace = true
+jsonwebtoken.workspace = true
+chrono.workspace = true
+anyhow.workspace = true
+dotenvy.workspace = true
+uuid.workspace = true
