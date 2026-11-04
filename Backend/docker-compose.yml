@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # Cold Storage: PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: synapse-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: synapse_mmo
+      POSTGRES_USER: synapse_user
+      POSTGRES_PASSWORD: synapse_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U synapse_user -d synapse_mmo"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Connection Pooler: PgBouncer
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: synapse-pgbouncer
+    restart: unless-stopped
+    environment:
+      DB_USER: synapse_user
+      DB_PASSWORD: synapse_password
+      DB_HOST: postgres
+      DB_NAME: synapse_mmo
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 10000
+      DEFAULT_POOL_SIZE: 50
+    ports:
+      - "6432:5432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Hot Cache, Warm Write-Back & Presence Pub/Sub: Redis
+  redis:
+    image: redis:7-alpine
+    container_name: synapse-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # LiveKit SFU: WebRTC Audio Matrix
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: synapse-livekit
+    restart: unless-stopped
+    command: --dev
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+    environment:
+      LIVEKIT_KEYS: "devkey: secret"
+
+volumes:
+  postgres_data:
+  redis_data:

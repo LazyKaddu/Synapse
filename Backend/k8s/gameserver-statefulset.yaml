@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: synapse-game-server
+  namespace: synapse
+  labels:
+    app.kubernetes.io/name: synapse-game-server
+    app.kubernetes.io/component: game-engine
+spec:
+  serviceName: "game-engine-headless"
+  replicas: 4
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: synapse-game-server
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: synapse-game-server
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9100"
+    spec:
+      terminationGracePeriodSeconds: 300
+      containers:
+        - name: game-server
+          image: synapse/game-server:latest
+          ports:
+            - containerPort: 9000
+              name: websocket
+            - containerPort: 9100
+              name: metrics
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - "/bin/sh"
+                  - "-c"
+                  - "kill -TERM 1"
+          resources:
+            requests:
+              cpu: 1000m
+              memory: 1Gi
+            limits:
+              cpu: 4000m
+              memory: 4Gi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: websocket
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: websocket
+            initialDelaySeconds: 3
+            periodSeconds: 5

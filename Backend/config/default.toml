@@ -1,0 +1,48 @@
+[server]
+environment = "development"
+region = "eu-west"
+shard_id = 1
+
+[gateway]
+host = "0.0.0.0"
+port = 8080
+
+[game_server]
+host = "0.0.0.0"
+port = 9000
+tick_rate_hz = 10
+chunk_size = 1000
+world_seed = 133742
+max_voice_tracks = 50
+voice_hysteresis_max = 60
+mega_crowd_threshold = 500
+flush_interval_secs = 180
+
+[telemetry]
+metrics_port = 9100
+log_level = "info"
+json_logs = false
+
+[database]
+master_url = "postgres://synapse_user:synapse_password@127.0.0.1:6432/synapse_mmo"
+replica_urls = ["postgres://synapse_user:synapse_password@127.0.0.1:6432/synapse_mmo"]
+max_connections = 50
+read_after_write_window_secs = 4
+
+[redis]
+primary_url = "redis://127.0.0.1:6379/0"
+global_presence_url = "redis://127.0.0.1:6379/1"
+presence_ttl_secs = 120
+session_ttl_secs = 86400
+blacklist_ttl_secs = 3600
+login_rate_limit_secs = 900
+
+[livekit]
+host = "http://127.0.0.1:7880"
+api_key = "devkey"
+api_secret = "secret"
+
+[auth]
+jwt_secret = "default_dev_secret_replace_in_production_32_bytes_min"
+jwt_expiration_hours = 24
+boarding_pass_expiration_seconds = 60

@@ -1,0 +1,85 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/synapse-common",
+    "crates/synapse-protocol",
+    "crates/synapse-spatial",
+    "crates/synapse-storage",
+    "crates/synapse-livekit",
+    "services/gateway",
+    "services/game-server",
+    "services/worker",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Synapse Team <engineering@synapse.mmo>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/synapse-mmo/synapse"
+
+[workspace.dependencies]
+# Internal workspace crates
+synapse-common = { path = "crates/synapse-common" }
+synapse-protocol = { path = "crates/synapse-protocol" }
+synapse-spatial = { path = "crates/synapse-spatial" }
+synapse-storage = { path = "crates/synapse-storage" }
+synapse-livekit = { path = "crates/synapse-livekit" }
+
+# Async runtime & networking
+tokio = { version = "1.41", features = ["full"] }
+tokio-tungstenite = "0.24"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+axum = { version = "0.7", features = ["ws", "macros"] }
+tower = { version = "0.5", features = ["util", "timeout"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "compression-gzip"] }
+async-trait = "0.1"
+
+# Binary serialization & parsing
+bytes = "1.8"
+bytemuck = { version = "1.19", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Databases & Cache
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "chrono", "uuid", "macros"] }
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager", "aio"] }
+
+# Procedural generation & Math
+noise = "0.9"
+rand = "0.8"
+
+# Concurrent memory & Data structures
+dashmap = "6.1"
+
+# Telemetry, Tracing & Metrics
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
+
+# Security, Cryptography & Identity
+jsonwebtoken = "9.3"
+argon2 = "0.5"
+uuid = { version = "1.11", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Config & Error handling
+config = "0.14"
+thiserror = "2.0"
+anyhow = "1.0"
+dotenvy = "0.15"
+
+# LiveKit SFU Client
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true

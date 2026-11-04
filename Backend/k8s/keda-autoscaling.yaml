@@ -1,0 +1,20 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: synapse-game-server-autoscaler
+  namespace: synapse
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: synapse-game-server
+  minReplicaCount: 2
+  maxReplicaCount: 20
+  cooldownPeriod: 300
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus-k8s.monitoring.svc.cluster.local:9090
+        metricName: active_websocket_connections
+        query: sum(active_websocket_connections{app="synapse-game-server"})
+        threshold: "8000"

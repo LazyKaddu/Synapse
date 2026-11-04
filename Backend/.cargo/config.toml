@@ -1,0 +1,9 @@
+[alias]
+c = "check --workspace"
+t = "test --workspace"
+b = "build --workspace"
+lint = "clippy --workspace --all-targets -- -D warnings"
+fmt-check = "fmt --all -- --check"
+
+[build]
+rustflags = ["-W", "rust_2018_idioms"]

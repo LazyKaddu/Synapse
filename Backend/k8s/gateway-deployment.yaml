@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: synapse-gateway
+  namespace: synapse
+  labels:
+    app.kubernetes.io/name: synapse-gateway
+    app.kubernetes.io/component: api-gateway
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: synapse-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: synapse-gateway
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9100"
+    spec:
+      containers:
+        - name: gateway
+          image: synapse/gateway:latest
+          ports:
+            - containerPort: 8080
+              name: http
+            - containerPort: 9100
+              name: metrics
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5

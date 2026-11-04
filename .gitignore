@@ -1,0 +1,22 @@
+arch-docs/*
+
+# Rust / Cargo
+/target/
+**/target/
+**/*.rs.bk
+Cargo.lock.temp
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Local changelogs & records
+BRANCH_RECORDS.md
+
+# IDEs & OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
