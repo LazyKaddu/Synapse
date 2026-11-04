@@ -1,0 +1,12 @@
+[server]
+environment = "production"
+
+[telemetry]
+log_level = "info"
+json_logs = true
+
+[database]
+max_connections = 100
+
+[game_server]
+flush_interval_secs = 180

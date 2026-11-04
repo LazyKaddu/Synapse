@@ -1,0 +1,6 @@
+[server]
+environment = "development"
+
+[telemetry]
+log_level = "debug"
+json_logs = false
