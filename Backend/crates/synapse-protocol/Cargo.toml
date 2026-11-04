@@ -1,0 +1,14 @@
+[package]
+name = "synapse-protocol"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+synapse-common.workspace = true
+bytes.workspace = true
+bytemuck.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
