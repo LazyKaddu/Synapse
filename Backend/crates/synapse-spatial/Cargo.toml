@@ -1,0 +1,11 @@
+[package]
+name = "synapse-spatial"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+synapse-common.workspace = true
+noise.workspace = true
+serde.workspace = true
