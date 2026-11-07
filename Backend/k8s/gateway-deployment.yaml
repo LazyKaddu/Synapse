@@ -19,9 +19,11 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "9100"
     spec:
+      enableServiceLinks: false
       containers:
         - name: gateway
           image: synapse/gateway:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
               name: http

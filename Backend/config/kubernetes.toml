@@ -1,0 +1,17 @@
+[server]
+environment = "kubernetes"
+
+[database]
+master_url = "postgres://synapse_user:synapse_password@synapse-postgres:5432/synapse_mmo"
+replica_urls = ["postgres://synapse_user:synapse_password@synapse-postgres:5432/synapse_mmo"]
+max_connections = 50
+
+[redis]
+primary_url = "redis://synapse-redis:6379/0"
+global_presence_url = "redis://synapse-redis:6379/1"
+
+[livekit]
+host = "http://synapse-livekit:7880"
+api_key = "devkey"
+api_secret = "secret"
+

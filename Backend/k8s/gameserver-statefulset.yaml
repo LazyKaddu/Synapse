@@ -20,10 +20,12 @@ spec:
         prometheus.io/scrape: "true"
         prometheus.io/port: "9100"
     spec:
+      enableServiceLinks: false
       terminationGracePeriodSeconds: 300
       containers:
         - name: game-server
           image: synapse/game-server:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 9000
               name: websocket
