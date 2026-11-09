@@ -189,6 +189,14 @@ async fn handle_socket(
                                 content,
                             } => {
                                 tracing::info!(channel = %channel, sender = %sender, content = %content, "Chat broadcast");
+                                if let Some(session) = state_clone.grid.sessions.get(&character_id) {
+                                    let subscribers = state_clone.grid.get_chunk_subscribers(session.current_chunk);
+                                    for sub_id in subscribers {
+                                        if let Some(sub_session) = state_clone.grid.sessions.get(&sub_id) {
+                                            sub_session.send(OutgoingMessage::Text(json_str.clone()));
+                                        }
+                                    }
+                                }
                             }
                             _ => {}
                         }
