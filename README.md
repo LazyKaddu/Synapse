@@ -20,4 +20,4 @@ We are building a browser-native, ultra-low-latency 2D Massively Multiplayer Onl
 * **Binary-First Networking:** To support massive player density, the game completely bypasses the browser's JSON bottleneck. Player movements are packed into raw 13-byte C-style arrays, allowing the client to process thousands of neighbor updates per second without triggering JavaScript garbage collection stutters.
 * **Hardware-Optimized Audio:** The engine protects the player's CPU by hard-culling audio. Even if 1,000 players are in a single zone, the Rust server dynamically filters the network to only stream the UDP voice tracks of the 50 closest people, maintaining absolute performance.
 
-This is not just a standard web game; it is a highly concurrent, horizontally scalable spatial engine disguised as a 2D RPG.
+This is not just a standard web game; it is a highly concurrent, horizontally scalable spatial engine disguised as a 2D RPG (game).
