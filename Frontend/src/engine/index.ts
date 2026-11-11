@@ -6,3 +6,4 @@ export * from './procedural/noise.ts';
 export * from './procedural/worldGen.ts';
 export * from './culling/looseCulling.ts';
 export * from './culling/spritePool.ts';
+export * from './prefab/PrefabCodec.ts';
