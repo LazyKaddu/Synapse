@@ -38,11 +38,29 @@ interface GameState {
   showChat: boolean;
   showInventory: boolean;
   showCharacter: boolean;
-  
+
+  // Procedural World & Culling State
+  worldSeed: number;
+  bufferMargin: number;
+  playerCoords: { x: number; y: number };
+  tileCoords: { x: number; y: number };
+  chunkCoords: { x: number; y: number };
+  cullingTelemetry: { visibleCount: number; loadedCount: number; pooledCount: number };
+  showDebugOverlay: boolean;
+  inspectInsetCulling: boolean;
+
   // Actions
   setConnected: (connected: boolean) => void;
   setConnecting: (connecting: boolean) => void;
   setLatency: (latency: number) => void;
+
+  setWorldSeed: (seed: number) => void;
+  setBufferMargin: (margin: number) => void;
+  setPlayerCoordinates: (x: number, y: number, tileSize?: number) => void;
+  setCullingTelemetry: (telemetry: { visibleCount: number; loadedCount: number; pooledCount: number }) => void;
+  toggleDebugOverlay: () => void;
+  setShowDebugOverlay: (show: boolean) => void;
+  toggleInspectInsetCulling: () => void;
   
   setPlayer: (player: Player) => void;
   setPlayerId: (id: string) => void;
@@ -123,11 +141,42 @@ const initialState = {
   showChat: false,
   showInventory: false,
   showCharacter: false,
+  worldSeed: 1337,
+  bufferMargin: 3,
+  playerCoords: { x: 0, y: 0 },
+  tileCoords: { x: 0, y: 0 },
+  chunkCoords: { x: 0, y: 0 },
+  cullingTelemetry: { visibleCount: 0, loadedCount: 0, pooledCount: 0 },
+  showDebugOverlay: false,
+  inspectInsetCulling: false,
 };
 
 export const useGameStore = create<GameState>()(
-  subscribeWithSelector((set, get) => ({
+  subscribeWithSelector((set) => ({
     ...initialState,
+
+    // Procedural World & Culling Actions
+    setWorldSeed: (seed) => set({ worldSeed: seed }),
+    setBufferMargin: (margin) => set({ bufferMargin: margin }),
+    setPlayerCoordinates: (x, y, tileSize = 64) => {
+      const tileX = Math.floor(x / tileSize);
+      const tileY = Math.floor(y / tileSize);
+      const chunkX = Math.floor(tileX / 16);
+      const chunkY = Math.floor(tileY / 16);
+      set({
+        playerCoords: { x, y },
+        tileCoords: { x: tileX, y: tileY },
+        chunkCoords: { x: chunkX, y: chunkY },
+      });
+    },
+    setCullingTelemetry: (telemetry) => set({ cullingTelemetry: telemetry }),
+    toggleDebugOverlay: () => set((state) => ({ showDebugOverlay: !state.showDebugOverlay })),
+    setShowDebugOverlay: (show) => set({ showDebugOverlay: show }),
+    toggleInspectInsetCulling: () =>
+      set((state) => ({
+        inspectInsetCulling: !state.inspectInsetCulling,
+        showDebugOverlay: !state.inspectInsetCulling ? true : state.showDebugOverlay,
+      })),
 
     // Connection
     setConnected: (connected) => set({ connected, connecting: false }),
@@ -310,6 +359,15 @@ export const selectConnected = () => useGameStore.getState().connected;
 export const selectLatency = () => useGameStore.getState().latency;
 export const selectMessages = () => useGameStore.getState().messages;
 export const selectCombatTarget = () => useGameStore.getState().combatTarget;
+
+// Selectors for procedural world & culling
+export const selectWorldSeed = () => useGameStore.getState().worldSeed;
+export const selectBufferMargin = () => useGameStore.getState().bufferMargin;
+export const selectPlayerCoords = () => useGameStore.getState().playerCoords;
+export const selectTileCoords = () => useGameStore.getState().tileCoords;
+export const selectChunkCoords = () => useGameStore.getState().chunkCoords;
+export const selectCullingTelemetry = () => useGameStore.getState().cullingTelemetry;
+export const selectShowDebugOverlay = () => useGameStore.getState().showDebugOverlay;
 
 // Subscribe to player position changes for interpolation
 export const subscribePlayerPosition = (callback: (position: { x: number; y: number; z: number }) => void) => {
