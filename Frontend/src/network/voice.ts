@@ -398,7 +398,6 @@ declare module './binary' {
 
 // Add voice packet builder method
 import { PacketBuilder } from './binary';
-import { OpCode } from './opcodes';
 
 PacketBuilder.prototype.buildVoiceSpeaking = function(
   entityId: string,
