@@ -1,7 +1,6 @@
 // PixiJS Application setup and canvas mounting
 
-import * as PIXI from 'pixi.js';
-import { Container, Graphics, Text, TextStyle } from 'pixi.js';
+import { Application, Container, Graphics, Text, TextStyle, Point } from 'pixi.js';
 
 export interface RendererConfig {
   width: number;
@@ -11,6 +10,7 @@ export interface RendererConfig {
   autoDensity: boolean;
   antialias: boolean;
   preferWebGL: boolean;
+  showStats?: boolean;
 }
 
 const DEFAULT_CONFIG: RendererConfig = {
@@ -21,10 +21,11 @@ const DEFAULT_CONFIG: RendererConfig = {
   autoDensity: true,
   antialias: true,
   preferWebGL: true,
+  showStats: false,
 };
 
 export class Renderer {
-  public app: PIXI.Application;
+  public app: Application;
   public stage: Container;
   public worldContainer: Container;
   public uiContainer: Container;
@@ -35,50 +36,67 @@ export class Renderer {
   private statsContainer: Container;
   private fpsText: Text;
   private entityCountText: Text;
+  private isInitialized = false;
+  private destroyRequested = false;
 
   constructor(canvas: HTMLCanvasElement, config: Partial<RendererConfig> = {}) {
     this.canvas = canvas;
     this.config = { ...DEFAULT_CONFIG, ...config };
-    
-    // Create PixiJS Application
-    this.app = new PIXI.Application({
-      view: this.canvas,
+    this.app = new Application();
+    this.stage = this.app.stage;
+    this.worldContainer = new Container();
+    this.uiContainer = new Container();
+    this.effectsContainer = new Container();
+    this.statsContainer = new Container();
+    this.fpsText = new Text({ text: 'FPS: 0' });
+    this.entityCountText = new Text({ text: 'Entities: 0' });
+  }
+
+  public async init(): Promise<void> {
+    if (this.isInitialized || this.destroyRequested) return;
+
+    await this.app.init({
+      canvas: this.canvas,
       width: this.config.width,
       height: this.config.height,
       backgroundColor: this.config.backgroundColor,
       resolution: this.config.resolution,
       autoDensity: this.config.autoDensity,
       antialias: this.config.antialias,
-      preferWebGL: this.config.preferWebGL,
+      preference: this.config.preferWebGL ? 'webgl' : undefined,
     });
 
-    // Setup container hierarchy
+    if (this.destroyRequested) {
+      this.app.destroy({ removeView: false }, { children: true });
+      this.destroyUnattachedContainers();
+      return;
+    }
+
     this.stage = this.app.stage;
     this.setupContainers();
-    this.setupDebugStats();
+    if (this.config.showStats) {
+      this.setupDebugStats();
+    }
     this.setupResizeHandler();
+    this.isInitialized = true;
   }
 
   private setupContainers(): void {
     // World container (game world, entities, terrain)
-    this.worldContainer = new Container();
     this.worldContainer.sortableChildren = true;
     this.worldContainer.zIndex = 0;
     this.stage.addChild(this.worldContainer);
 
     // Effects container (particles, spell effects)
-    this.effectsContainer = new Container();
     this.effectsContainer.zIndex = 10;
     this.stage.addChild(this.effectsContainer);
 
     // UI container (health bars, nameplates, minimap)
-    this.uiContainer = new Container();
     this.uiContainer.zIndex = 100;
     this.stage.addChild(this.uiContainer);
   }
 
   private setupDebugStats(): void {
-    this.statsContainer = new Container();
     this.statsContainer.zIndex = 1000;
     this.stage.addChild(this.statsContainer);
 
@@ -86,15 +104,14 @@ export class Renderer {
       fontFamily: 'Monospace',
       fontSize: 14,
       fill: 0x00ff00,
-      stroke: 0x000000,
-      strokeThickness: 2,
+      stroke: { color: 0x000000, width: 2 },
     });
 
-    this.fpsText = new Text('FPS: 0', style);
+    this.fpsText = new Text({ text: 'FPS: 0', style });
     this.fpsText.position.set(10, 10);
     this.statsContainer.addChild(this.fpsText);
 
-    this.entityCountText = new Text('Entities: 0', style);
+    this.entityCountText = new Text({ text: 'Entities: 0', style });
     this.entityCountText.position.set(10, 30);
     this.statsContainer.addChild(this.entityCountText);
   }
@@ -116,90 +133,88 @@ export class Renderer {
     this.entityCountText.text = `Entities: ${entityCount}`;
   }
 
-  // Main render call (called by GameLoop)
-  render(interpolationAlpha: number): void {
-    // PixiJS auto-renders via requestAnimationFrame
-    // This method can be used for manual render if needed
+  // Main render call
+  render(): void {
     this.app.render();
   }
 
-  // Update loop (called at variable rate)
-  update(deltaTime: number): void {
-    // Update PixiJS ticker
+  // Update loop
+  update(): void {
     this.app.ticker.update();
-  }
-
-  // Fixed update (called at fixed rate)
-  fixedUpdate(deltaTime: number): void {
-    // Physics updates would go here if using a physics engine
   }
 
   // Resize canvas and renderer
   resize(width: number, height: number): void {
     this.config.width = width;
     this.config.height = height;
-    
-    this.app.renderer.resize(width, height);
-    
-    // Update camera/viewport
-    this.worldContainer.position.set(width / 2, height / 2);
+
+    if (this.isInitialized) {
+      this.app.renderer.resize(width, height);
+    }
   }
 
   // Get world position from screen coordinates
   screenToWorld(screenX: number, screenY: number): { x: number; y: number } {
-    const worldPos = this.worldContainer.toLocal(new PIXI.Point(screenX, screenY));
+    const worldPos = this.worldContainer.toLocal(new Point(screenX, screenY));
     return { x: worldPos.x, y: worldPos.y };
   }
 
   // Get screen position from world coordinates
   worldToScreen(worldX: number, worldY: number): { x: number; y: number } {
-    const screenPos = this.worldContainer.toGlobal(new PIXI.Point(worldX, worldY));
+    const screenPos = this.worldContainer.toGlobal(new Point(worldX, worldY));
     return { x: screenPos.x, y: screenPos.y };
   }
 
   // Add child to world container
-  addToWorld(child: PIXI.DisplayObject, zIndex = 0): void {
+  addToWorld(child: Container, zIndex = 0): void {
     child.zIndex = zIndex;
     this.worldContainer.addChild(child);
   }
 
   // Remove child from world container
-  removeFromWorld(child: PIXI.DisplayObject): void {
+  removeFromWorld(child: Container): void {
     this.worldContainer.removeChild(child);
   }
 
   // Add child to UI container
-  addToUI(child: PIXI.DisplayObject): void {
+  addToUI(child: Container): void {
     this.uiContainer.addChild(child);
   }
 
   // Remove child from UI container
-  removeFromUI(child: PIXI.DisplayObject): void {
+  removeFromUI(child: Container): void {
     this.uiContainer.removeChild(child);
   }
 
   // Add child to effects container
-  addEffect(child: PIXI.DisplayObject): void {
+  addEffect(child: Container): void {
     this.effectsContainer.addChild(child);
   }
 
   // Remove child from effects container
-  removeEffect(child: PIXI.DisplayObject): void {
+  removeEffect(child: Container): void {
     this.effectsContainer.removeChild(child);
   }
 
-  // Camera follow
+  // Camera follow with integer pixel rounding to eliminate tile shimmering
   follow(target: { x: number; y: number }, lerp = 0.1): void {
-    const targetX = -target.x + this.config.width / 2;
-    const targetY = -target.y + this.config.height / 2;
+    const targetX = Math.round(-target.x + this.config.width / 2);
+    const targetY = Math.round(-target.y + this.config.height / 2);
     
-    this.worldContainer.position.x += (targetX - this.worldContainer.position.x) * lerp;
-    this.worldContainer.position.y += (targetY - this.worldContainer.position.y) * lerp;
+    this.worldContainer.position.x = Math.round(
+      this.worldContainer.position.x + (targetX - this.worldContainer.position.x) * lerp
+    );
+    this.worldContainer.position.y = Math.round(
+      this.worldContainer.position.y + (targetY - this.worldContainer.position.y) * lerp
+    );
   }
 
-  // Set camera position directly
+  // Set camera position directly with integer pixel rounding
   setCameraPosition(x: number, y: number): void {
-    this.worldContainer.position.set(-x + this.config.width / 2, -y + this.config.height / 2);
+    this.worldContainer.position.set(
+      Math.round(-x + this.config.width / 2),
+      Math.round(-y + this.config.height / 2)
+    );
   }
 
   // Get camera position
@@ -236,12 +251,10 @@ export class Renderer {
     this.app.ticker.add(shakeUpdate);
   }
 
-  // Get canvas element
   getCanvas(): HTMLCanvasElement {
     return this.canvas;
   }
 
-  // Get renderer dimensions
   getWidth(): number {
     return this.config.width;
   }
@@ -250,10 +263,32 @@ export class Renderer {
     return this.config.height;
   }
 
-  // Destroy renderer and cleanup
+  private destroyUnattachedContainers(): void {
+    const containers: Container[] = [
+      this.worldContainer,
+      this.uiContainer,
+      this.effectsContainer,
+      this.statsContainer,
+      this.fpsText,
+      this.entityCountText,
+    ];
+    for (const container of containers) {
+      if (!container.destroyed) {
+        container.destroy({ children: true });
+      }
+    }
+  }
+
   destroy(): void {
-    window.removeEventListener('resize', (this as any)._resizeHandler);
-    this.app.destroy(true, { children: true, texture: true, baseTexture: true });
+    this.destroyRequested = true;
+    if ((this as any)._resizeHandler) {
+      window.removeEventListener('resize', (this as any)._resizeHandler);
+      (this as any)._resizeHandler = null;
+    }
+    if (this.isInitialized) {
+      this.app.destroy({ removeView: false }, { children: true });
+      this.isInitialized = false;
+    }
   }
 }
 
@@ -261,8 +296,8 @@ export class Renderer {
 export function createDebugRect(
   width: number,
   height: number,
-  color: number = 0xff0000,
-  alpha: number = 0.5
+  color = 0xff0000,
+  alpha = 0.5
 ): Graphics {
   const rect = new Graphics();
   rect.rect(0, 0, width, height);
@@ -273,8 +308,8 @@ export function createDebugRect(
 // Utility: Create a circle for debugging
 export function createDebugCircle(
   radius: number,
-  color: number = 0x00ff00,
-  alpha: number = 0.5
+  color = 0x00ff00,
+  alpha = 0.5
 ): Graphics {
   const circle = new Graphics();
   circle.circle(0, 0, radius);
@@ -287,13 +322,12 @@ export function createLabel(
   text: string,
   style: Partial<TextStyle> = {}
 ): Text {
-  const defaultStyle: TextStyle = new TextStyle({
+  const defaultStyle = new TextStyle({
     fontFamily: 'Arial',
     fontSize: 12,
     fill: 0xffffff,
-    stroke: 0x000000,
-    strokeThickness: 2,
+    stroke: { color: 0x000000, width: 2 },
     ...style,
   });
-  return new Text(text, defaultStyle);
+  return new Text({ text, style: defaultStyle });
 }
