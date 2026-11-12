@@ -1,5 +1,5 @@
 use crate::models::PrefabRecord;
-use crate::router::{DbRouter, QueryIntent};
+use crate::router::{DbRouter, QueryIntent, ReadConsistency};
 use std::sync::Arc;
 use synapse_common::{Result, SynapseError};
 
@@ -81,7 +81,8 @@ impl PrefabRepository for PgPrefabRepository {
         let valid_name = validate_prefab_name(name)?;
         let pool = self
             .router
-            .get_pool(QueryIntent::Write, Some(account_id), shard_id)?;
+            .resolve_pool(QueryIntent::Write, Some(account_id))
+            .await?;
 
         let record = sqlx::query_as::<_, PrefabRecord>(
             r#"
@@ -103,7 +104,7 @@ impl PrefabRepository for PgPrefabRepository {
         .await
         .map_err(|e| SynapseError::Database(e.to_string()))?;
 
-        self.router.flag_write(account_id);
+        self.router.complete_write(account_id).await;
         Ok(record)
     }
 
@@ -114,7 +115,8 @@ impl PrefabRepository for PgPrefabRepository {
     ) -> Result<Vec<PrefabRecord>> {
         let pool = self
             .router
-            .get_pool(QueryIntent::Read, Some(account_id), shard_id)?;
+            .resolve_pool(QueryIntent::Read(ReadConsistency::Session), Some(account_id))
+            .await?;
 
         let records = sqlx::query_as::<_, PrefabRecord>(
             r#"
@@ -141,7 +143,8 @@ impl PrefabRepository for PgPrefabRepository {
     ) -> Result<Option<PrefabRecord>> {
         let pool = self
             .router
-            .get_pool(QueryIntent::Read, Some(account_id), shard_id)?;
+            .resolve_pool(QueryIntent::Read(ReadConsistency::Session), Some(account_id))
+            .await?;
 
         let record = sqlx::query_as::<_, PrefabRecord>(
             r#"
@@ -163,7 +166,8 @@ impl PrefabRepository for PgPrefabRepository {
     async fn delete(&self, id: i64, account_id: i64, shard_id: i32) -> Result<bool> {
         let pool = self
             .router
-            .get_pool(QueryIntent::Write, Some(account_id), shard_id)?;
+            .resolve_pool(QueryIntent::Write, Some(account_id))
+            .await?;
 
         let result = sqlx::query(
             r#"
@@ -178,7 +182,7 @@ impl PrefabRepository for PgPrefabRepository {
         .await
         .map_err(|e| SynapseError::Database(e.to_string()))?;
 
-        self.router.flag_write(account_id);
+        self.router.complete_write(account_id).await;
         Ok(result.rows_affected() > 0)
     }
 }
