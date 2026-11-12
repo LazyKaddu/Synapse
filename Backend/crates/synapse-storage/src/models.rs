@@ -37,3 +37,19 @@ pub struct InventoryItem {
     pub quantity: i32,
     pub acquired_at: Option<DateTime<Utc>>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct PrefabRecord {
+    pub id: i64,
+    pub account_id: i64,
+    pub shard_id: i32,
+    pub name: String,
+    pub width: i32,
+    pub height: i32,
+    pub anchor_x: i16,
+    pub anchor_y: i16,
+    pub anchor_z: i16,
+    pub payload: Vec<u8>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
+}
