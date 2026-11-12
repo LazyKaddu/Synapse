@@ -37,6 +37,7 @@ async fn main() -> anyhow::Result<()> {
         vec![],
         config.database.read_after_write_window_secs as i64,
     ));
+    let _router_cleanup = router.spawn_cleanup_task(std::time::Duration::from_secs(30));
 
     // 4. Initialize Redis Cache
     let redis_client = redis::Client::open(config.redis.primary_url.as_str())?;
