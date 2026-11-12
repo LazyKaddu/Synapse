@@ -9,4 +9,4 @@ pub use repositories::{
     AccountRepository, CharacterRepository, InventoryRepository, PgAccountRepository,
     PgCharacterRepository, PgInventoryRepository, PgPrefabRepository, PrefabRepository,
 };
-pub use router::{DbRouter, QueryIntent};
+pub use router::{DbRouter, PgLsn, QueryIntent, ReadConsistency, WriteTracker, WriteWatermark};
