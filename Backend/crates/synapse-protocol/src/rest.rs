@@ -45,3 +45,16 @@ pub struct WorldJoinResponse {
     pub ws_url: String,
     pub ticket: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrefabSummaryDto {
+    pub id: i64,
+    pub name: String,
+    pub width: i32,
+    pub height: i32,
+    pub anchor_x: i16,
+    pub anchor_y: i16,
+    pub anchor_z: i16,
+    pub byte_length: usize,
+    pub created_at: String,
+}
