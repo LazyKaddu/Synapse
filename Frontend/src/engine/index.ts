@@ -7,3 +7,5 @@ export * from './procedural/worldGen.ts';
 export * from './culling/looseCulling.ts';
 export * from './culling/spritePool.ts';
 export * from './prefab/PrefabCodec.ts';
+export * from './prefab/assetRegistry.ts';
+export * from './prefab/builderGrid.ts';

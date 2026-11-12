@@ -4,8 +4,15 @@
  * zero-allocation sprite pooling, character controller, and debug culling overlay.
  */
 
-import { Container, Graphics, Sprite } from 'pixi.js';
+import { Container, Graphics, Sprite, Texture } from 'pixi.js';
 import { TilesetManager } from './tileset/tileset.ts';
+import { AssetLibraryLoader, EMPTY_ASSET_ID } from './prefab/assetRegistry.ts';
+import {
+  PrefabCodec,
+  StackedPrefabCodec,
+  type PrefabData,
+  type StackedPrefabData,
+} from './prefab/PrefabCodec.ts';
 import { getTileAt, RENDER_TILE_SIZE, RENDER_SCALE, type WorldTile } from './procedural/worldGen.ts';
 import { calculateTileBounds, type TileBounds } from './culling/looseCulling.ts';
 import { SpritePool, type CullingTelemetry } from './culling/spritePool.ts';
@@ -22,10 +29,14 @@ export interface WorldConfig {
 export class World {
   public readonly worldContainer: Container;
   public readonly tileContainer: Container;
+  public readonly prefabBelowContainer: Container;
   public readonly characterContainer: Container;
+  public readonly prefabAboveContainer: Container;
+  public readonly prefabPreviewContainer: Container;
   public readonly debugOverlayContainer: Container;
 
   private readonly tilesetManager: TilesetManager;
+  private readonly assetLibrary: AssetLibraryLoader;
   private readonly spritePool: SpritePool<Sprite>;
 
   // Character controller state
@@ -45,6 +56,7 @@ export class World {
   private debugGraphics: Graphics;
   private isInitialized = false;
   private isDestroyed = false;
+  private isEditorOpen = false;
   private showDebugOverlay = false;
   private inspectInsetCulling = false;
   private facingAngle = -Math.PI / 2;
@@ -66,24 +78,41 @@ export class World {
     this.viewportWidth = config.viewportWidth;
     this.viewportHeight = config.viewportHeight;
 
-    // Root containers
+    // Root containers: character is permanently zIndex = 0;
+    // worldZ <= 0 prefabs render below character, worldZ > 0 prefabs render above character.
     this.worldContainer = new Container();
     this.worldContainer.sortableChildren = true;
 
     this.tileContainer = new Container();
-    this.tileContainer.zIndex = 0;
+    this.tileContainer.zIndex = -40000;
     this.worldContainer.addChild(this.tileContainer);
 
+    this.prefabBelowContainer = new Container();
+    this.prefabBelowContainer.zIndex = -1;
+    this.prefabBelowContainer.sortableChildren = true;
+    this.worldContainer.addChild(this.prefabBelowContainer);
+
     this.characterContainer = new Container();
-    this.characterContainer.zIndex = 10;
+    this.characterContainer.zIndex = 0;
     this.worldContainer.addChild(this.characterContainer);
 
+    this.prefabAboveContainer = new Container();
+    this.prefabAboveContainer.zIndex = 1;
+    this.prefabAboveContainer.sortableChildren = true;
+    this.worldContainer.addChild(this.prefabAboveContainer);
+
+    this.prefabPreviewContainer = new Container();
+    this.prefabPreviewContainer.zIndex = 40000;
+    this.prefabPreviewContainer.sortableChildren = true;
+    this.worldContainer.addChild(this.prefabPreviewContainer);
+
     this.debugOverlayContainer = new Container();
-    this.debugOverlayContainer.zIndex = 20;
+    this.debugOverlayContainer.zIndex = 50000;
     this.worldContainer.addChild(this.debugOverlayContainer);
 
-    // Tileset manager
+    // Tileset manager & prefab asset library
     this.tilesetManager = new TilesetManager();
+    this.assetLibrary = new AssetLibraryLoader();
 
     // Sprite pool with zero net allocations during movement
     this.spritePool = new SpritePool<Sprite>({
@@ -150,13 +179,121 @@ export class World {
   }
 
   /**
-   * Initializes tileset textures and populates initial view tiles.
+   * Initializes tileset textures, prefab asset library, and populates initial view tiles.
    */
   public async init(tilesetPath?: string): Promise<void> {
-    await this.tilesetManager.load(tilesetPath);
+    await Promise.all([
+      this.tilesetManager.load(tilesetPath),
+      this.assetLibrary.load(),
+    ]);
     if (this.isDestroyed) return;
     this.isInitialized = true;
     this.updateCameraAndCulling();
+  }
+
+  /**
+   * Pauses/resumes keyboard movement while the Building Editor modal is open.
+   */
+  public setEditorOpen(open: boolean): void {
+    this.isEditorOpen = open;
+    if (open) {
+      this.keysDown.clear();
+    }
+  }
+
+  public getAssetLibrary(): AssetLibraryLoader {
+    return this.assetLibrary;
+  }
+
+  public getAssetTexture(assetId: number): Texture {
+    return this.assetLibrary.getTexture(assetId);
+  }
+
+  /**
+   * Converts screen pixel coordinates into snapped world tile indices and top-left world pixel coordinates.
+   */
+  public screenToSnappedTileWorld(
+    screenX: number,
+    screenY: number
+  ): { tileX: number; tileY: number; worldX: number; worldY: number } {
+    const rawWorldX = screenX - this.worldContainer.position.x;
+    const rawWorldY = screenY - this.worldContainer.position.y;
+    const tileX = Math.floor(rawWorldX / RENDER_TILE_SIZE);
+    const tileY = Math.floor(rawWorldY / RENDER_TILE_SIZE);
+    return {
+      tileX,
+      tileY,
+      worldX: tileX * RENDER_TILE_SIZE,
+      worldY: tileY * RENDER_TILE_SIZE,
+    };
+  }
+
+  /**
+   * Decodes and instantiates a single-layer or stacked binary prefab relative to character zIndex = 0.
+   * Blocks with worldZ <= 0 render below the character; blocks with worldZ > 0 render above the character.
+   */
+  public stampPrefabInWorld(
+    buffer: ArrayBuffer,
+    worldX: number,
+    worldY: number,
+    anchorZOverride?: number
+  ): Sprite[] {
+    const stacked = StackedPrefabCodec.decodeAny(buffer);
+    return StackedPrefabCodec.instantiate(
+      stacked,
+      worldX,
+      worldY,
+      this.prefabBelowContainer,
+      (id) => this.getAssetTexture(id),
+      {
+        emptyAssetId: EMPTY_ASSET_ID,
+        anchorZOverride,
+        resolveContainer: (worldZ) =>
+          worldZ > 0 ? this.prefabAboveContainer : this.prefabBelowContainer,
+      }
+    );
+  }
+
+  private clearPlacementPreview(): void {
+    const removed = this.prefabPreviewContainer.removeChildren();
+    for (const child of removed) {
+      child.destroy({ children: false, texture: false, textureSource: false });
+    }
+  }
+
+  /**
+   * Renders a semi-transparent placement preview on prefabPreviewContainer, or clears it when null.
+   */
+  public updatePlacementPreview(
+    prefab: PrefabData | StackedPrefabData | null,
+    worldX: number,
+    worldY: number,
+    anchorZOverride?: number
+  ): void {
+    this.clearPlacementPreview();
+    if (!prefab) return;
+
+    const sprites =
+      'layers' in prefab
+        ? StackedPrefabCodec.instantiate(
+            prefab,
+            worldX,
+            worldY,
+            this.prefabPreviewContainer,
+            (id) => this.getAssetTexture(id),
+            { emptyAssetId: EMPTY_ASSET_ID, anchorZOverride }
+          )
+        : PrefabCodec.instantiate(
+            prefab,
+            worldX,
+            worldY,
+            this.prefabPreviewContainer,
+            (id) => this.getAssetTexture(id),
+            { emptyAssetId: EMPTY_ASSET_ID, anchorZOverride }
+          );
+    for (const sprite of sprites) {
+      sprite.alpha = 0.55;
+    }
   }
 
   private createCharacterBox(): void {
@@ -171,6 +308,10 @@ export class World {
   }
 
   private handleKeyDown(e: KeyboardEvent): void {
+    if (this.isEditorOpen) {
+      return;
+    }
+
     // Ignore input if user is typing in a text field
     const target = e.target as HTMLElement | null;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
@@ -205,6 +346,10 @@ export class World {
   }
 
   private processMovement(dt: number): void {
+    if (this.isEditorOpen) {
+      return;
+    }
+
     let dx = 0;
     let dy = 0;
 
@@ -340,8 +485,10 @@ export class World {
       this.storeUnsubscribe();
       this.storeUnsubscribe = null;
     }
+    this.clearPlacementPreview();
     this.spritePool.clear();
     this.tilesetManager.destroy();
+    this.assetLibrary.destroy();
     this.worldContainer.destroy({ children: true });
   }
 }
