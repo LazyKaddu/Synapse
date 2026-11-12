@@ -2,6 +2,7 @@ mod routes;
 mod state;
 
 use axum::{
+    extract::DefaultBodyLimit,
     routing::{get, post},
     Router,
 };
@@ -9,7 +10,9 @@ use state::AppState;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use synapse_common::{init_telemetry, AppConfig};
-use synapse_storage::{DbRouter, PgAccountRepository, PgCharacterRepository, RedisStateCache};
+use synapse_storage::{
+    DbRouter, PgAccountRepository, PgCharacterRepository, PgPrefabRepository, RedisStateCache,
+};
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
@@ -45,6 +48,7 @@ async fn main() -> anyhow::Result<()> {
         config: config.clone(),
         account_repo: Arc::new(PgAccountRepository::new(router.clone())),
         character_repo: Arc::new(PgCharacterRepository::new(router.clone())),
+        prefab_repo: Arc::new(PgPrefabRepository::new(router.clone())),
         cache,
     };
 
@@ -65,9 +69,19 @@ async fn main() -> anyhow::Result<()> {
             post(routes::characters::create_character_handler),
         )
         .route(
+            "/api/v1/prefabs",
+            get(routes::prefabs::list_prefabs_handler).post(routes::prefabs::create_prefab_handler),
+        )
+        .route(
+            "/api/v1/prefabs/:id",
+            get(routes::prefabs::get_prefab_handler)
+                .delete(routes::prefabs::delete_prefab_handler),
+        )
+        .route(
             "/api/v1/world/join",
             post(routes::world::join_world_handler),
         )
+        .layer(DefaultBodyLimit::max(routes::prefabs::MAX_PREFAB_BYTES))
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::permissive())
         .with_state(state);
