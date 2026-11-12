@@ -1,5 +1,5 @@
 use crate::models::Character;
-use crate::router::{DbRouter, QueryIntent};
+use crate::router::{DbRouter, QueryIntent, ReadConsistency};
 use chrono::Utc;
 use std::sync::Arc;
 use synapse_common::{Result, SynapseError};
@@ -34,7 +34,10 @@ impl PgCharacterRepository {
 #[async_trait::async_trait]
 impl CharacterRepository for PgCharacterRepository {
     async fn find_by_id(&self, id: i64, shard_id: i32) -> Result<Option<Character>> {
-        let pool = self.router.get_pool(QueryIntent::Read, None, shard_id)?;
+        let pool = self
+            .router
+            .resolve_pool(QueryIntent::Read(ReadConsistency::Session), None)
+            .await?;
         let character = sqlx::query_as::<_, Character>(
             "SELECT id, account_id, shard_id, display_name, chunk_x, chunk_y, pos_x, pos_y, last_saved_at FROM characters WHERE id = $1 AND shard_id = $2"
         )
@@ -50,7 +53,8 @@ impl CharacterRepository for PgCharacterRepository {
     async fn find_by_account(&self, account_id: i64, shard_id: i32) -> Result<Vec<Character>> {
         let pool = self
             .router
-            .get_pool(QueryIntent::Read, Some(account_id), shard_id)?;
+            .resolve_pool(QueryIntent::Read(ReadConsistency::Session), Some(account_id))
+            .await?;
         let characters = sqlx::query_as::<_, Character>(
             "SELECT id, account_id, shard_id, display_name, chunk_x, chunk_y, pos_x, pos_y, last_saved_at FROM characters WHERE account_id = $1 AND shard_id = $2"
         )
@@ -71,7 +75,8 @@ impl CharacterRepository for PgCharacterRepository {
     ) -> Result<Character> {
         let pool = self
             .router
-            .get_pool(QueryIntent::Write, Some(account_id), shard_id)?;
+            .resolve_pool(QueryIntent::Write, Some(account_id))
+            .await?;
         let character = sqlx::query_as::<_, Character>(
             r#"
             INSERT INTO characters (account_id, shard_id, display_name, chunk_x, chunk_y, pos_x, pos_y, last_saved_at)
@@ -86,7 +91,7 @@ impl CharacterRepository for PgCharacterRepository {
         .await
         .map_err(|e| SynapseError::Database(e.to_string()))?;
 
-        self.router.flag_write(account_id);
+        self.router.complete_write(account_id).await;
         Ok(character)
     }
 
@@ -99,7 +104,7 @@ impl CharacterRepository for PgCharacterRepository {
         pos_x: f32,
         pos_y: f32,
     ) -> Result<()> {
-        let pool = self.router.get_pool(QueryIntent::Write, None, shard_id)?;
+        let pool = self.router.resolve_pool(QueryIntent::Write, None).await?;
         sqlx::query(
             r#"
             UPDATE characters

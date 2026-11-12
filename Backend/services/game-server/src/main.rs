@@ -39,6 +39,7 @@ async fn main() -> anyhow::Result<()> {
         vec![],
         config.database.read_after_write_window_secs as i64,
     ));
+    let _router_cleanup = router.spawn_cleanup_task(std::time::Duration::from_secs(30));
     let character_repo: Arc<dyn CharacterRepository> =
         Arc::new(PgCharacterRepository::new(router.clone()));
 

@@ -1,5 +1,5 @@
 use crate::models::InventoryItem;
-use crate::router::{DbRouter, QueryIntent};
+use crate::router::{DbRouter, QueryIntent, ReadConsistency};
 use std::sync::Arc;
 use synapse_common::{Result, SynapseError};
 
@@ -36,7 +36,10 @@ impl InventoryRepository for PgInventoryRepository {
         character_id: i64,
         shard_id: i32,
     ) -> Result<Vec<InventoryItem>> {
-        let pool = self.router.get_pool(QueryIntent::Read, None, shard_id)?;
+        let pool = self
+            .router
+            .resolve_pool(QueryIntent::Read(ReadConsistency::Session), None)
+            .await?;
         let items = sqlx::query_as::<_, InventoryItem>(
             "SELECT id, character_id, shard_id, item_definition_id, quantity, acquired_at FROM inventory_items WHERE character_id = $1 AND shard_id = $2"
         )
@@ -56,7 +59,7 @@ impl InventoryRepository for PgInventoryRepository {
         item_definition_id: i32,
         quantity: i32,
     ) -> Result<()> {
-        let pool = self.router.get_pool(QueryIntent::Write, None, shard_id)?;
+        let pool = self.router.resolve_pool(QueryIntent::Write, None).await?;
         sqlx::query(
             r#"
             INSERT INTO inventory_items (character_id, shard_id, item_definition_id, quantity, acquired_at)

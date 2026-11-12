@@ -1,5 +1,5 @@
 use crate::models::Account;
-use crate::router::{DbRouter, QueryIntent};
+use crate::router::{DbRouter, QueryIntent, ReadConsistency};
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
@@ -43,9 +43,11 @@ impl PgAccountRepository {
 #[async_trait::async_trait]
 impl AccountRepository for PgAccountRepository {
     async fn find_by_id(&self, id: i64, shard_id: i32) -> Result<Option<Account>> {
+        // Account / ban / role lookups are security- and auth-critical, so route strictly to writer.
         let pool = self
             .router
-            .get_pool(QueryIntent::Read, Some(id), shard_id)?;
+            .resolve_pool(QueryIntent::Read(ReadConsistency::Strong), Some(id))
+            .await?;
         let account = sqlx::query_as::<_, Account>(
             "SELECT id, username, email, password_hash, is_banned, ban_reason, role, shard_id, created_at, last_login_at FROM accounts WHERE id = $1 AND shard_id = $2"
         )
@@ -59,7 +61,11 @@ impl AccountRepository for PgAccountRepository {
     }
 
     async fn find_by_username(&self, username: &str, shard_id: i32) -> Result<Option<Account>> {
-        let pool = self.router.get_pool(QueryIntent::Read, None, shard_id)?;
+        // Login checks password and ban status right after registration too, so require strong consistency.
+        let pool = self
+            .router
+            .resolve_pool(QueryIntent::Read(ReadConsistency::Strong), None)
+            .await?;
         let account = sqlx::query_as::<_, Account>(
             "SELECT id, username, email, password_hash, is_banned, ban_reason, role, shard_id, created_at, last_login_at FROM accounts WHERE username = $1 AND shard_id = $2"
         )
@@ -86,7 +92,7 @@ impl AccountRepository for PgAccountRepository {
             .map_err(|e| SynapseError::Internal(format!("Password hashing failed: {}", e)))?
             .to_string();
 
-        let pool = self.router.get_pool(QueryIntent::Write, None, shard_id)?;
+        let pool = self.router.resolve_pool(QueryIntent::Write, None).await?;
         let account = sqlx::query_as::<_, Account>(
             r#"
             INSERT INTO accounts (username, email, password_hash, shard_id, created_at)
@@ -102,7 +108,7 @@ impl AccountRepository for PgAccountRepository {
         .await
         .map_err(|e| SynapseError::Database(e.to_string()))?;
 
-        self.router.flag_write(account.id);
+        self.router.complete_write(account.id).await;
         Ok(account)
     }
 
@@ -117,7 +123,8 @@ impl AccountRepository for PgAccountRepository {
     async fn update_last_login(&self, id: i64, shard_id: i32) -> Result<()> {
         let pool = self
             .router
-            .get_pool(QueryIntent::Write, Some(id), shard_id)?;
+            .resolve_pool(QueryIntent::Write, Some(id))
+            .await?;
         sqlx::query("UPDATE accounts SET last_login_at = $1 WHERE id = $2 AND shard_id = $3")
             .bind(Utc::now())
             .bind(id)
@@ -126,7 +133,7 @@ impl AccountRepository for PgAccountRepository {
             .await
             .map_err(|e| SynapseError::Database(e.to_string()))?;
 
-        self.router.flag_write(id);
+        self.router.complete_write(id).await;
         Ok(())
     }
 
