@@ -69,6 +69,12 @@ interface GameState {
     forestZone?: string;
     isCanopy?: boolean;
     treeMaturity?: string;
+    villageName?: string;
+    villageDistrict?: string;
+    villageBuilding?: string;
+    villageHousePart?: string;
+    villageProp?: string;
+    isVillagePavement?: boolean;
   } | null;
 
   // Actions

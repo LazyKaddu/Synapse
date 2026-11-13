@@ -472,6 +472,12 @@ export class World {
         forestZone: forest.zone,
         isCanopy: forest.isCanopy,
         treeMaturity: tree?.maturity,
+        villageName: village?.villageName,
+        villageDistrict: village?.tileInfo?.district,
+        villageBuilding: village?.tileInfo?.house?.model.name,
+        villageHousePart: village?.tileInfo?.housePart,
+        villageProp: village?.tileInfo?.prop?.label,
+        isVillagePavement: village?.tileInfo?.isPavement,
       });
     }
 

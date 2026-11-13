@@ -11,8 +11,24 @@ import {
   type TreeMaturity,
   type ForestTreeInfo,
 } from './forestGen.ts';
+import {
+  VillageGenerator,
+  type VillageTileInfo,
+  type VillageDistrict,
+  type PlacedHouse,
+  type VillageProp,
+} from './villageGen.ts';
 
-export type { VoronoiResult, ForestTileInfo, TreeMaturity, ForestTreeInfo };
+export type {
+  VoronoiResult,
+  ForestTileInfo,
+  TreeMaturity,
+  ForestTreeInfo,
+  VillageTileInfo,
+  VillageDistrict,
+  PlacedHouse,
+  VillageProp,
+};
 
 /**
  * 5 Canonical World Biome Types.
@@ -111,6 +127,9 @@ export interface VillageInfo {
   readonly hasVillage: boolean;
   readonly isPlaza: boolean;
   readonly isInside: boolean;
+  readonly villageName?: string;
+  readonly district?: VillageDistrict;
+  readonly tileInfo?: VillageTileInfo;
 }
 
 /**
@@ -145,6 +164,7 @@ export class WorldNoise {
   readonly seed: number;
   readonly seeds: SubSeeds;
   readonly forestSpread: ForestSpreadGenerator;
+  readonly villageGen: VillageGenerator;
 
   constructor(configOrSeed: number | WorldNoiseConfig = 0) {
     if (typeof configOrSeed === 'number') {
@@ -168,6 +188,11 @@ export class WorldNoise {
       macroScale: this.config.forestDensityScale,
       edgeThreshold: this.config.forestThreshold,
       treeMinSpacing: this.config.treeMinSpacing,
+    });
+    this.villageGen = new VillageGenerator({
+      seed: this.masterSeed,
+      villageRadius: this.config.villageRadius,
+      plazaRadius: Math.max(2, Math.floor(this.config.villageRadius * 0.25)),
     });
   }
 
@@ -281,6 +306,25 @@ export class WorldNoise {
     if (this.isWaterAt(tx, ty)) {
       return null;
     }
+
+    // Suppress trees on village structural elements (houses, plaza, roads, props)
+    const village = this.getVillageAt(tx, ty);
+    if (village && village.isInside) {
+      if (
+        this.villageGen.isStructuralAt(
+          tx,
+          ty,
+          village.cellId,
+          village.centerCol,
+          village.centerRow,
+          village.plazaCenter.x,
+          village.plazaCenter.y
+        )
+      ) {
+        return null;
+      }
+    }
+
     const tree = this.forestSpread.getTreeAt(tx, ty);
     if (!tree) {
       return null;
@@ -348,6 +392,18 @@ export class WorldNoise {
     const isPlaza = distanceToCenter <= Math.max(2, Math.floor(radius * 0.25));
     const isInside = distanceToCenter <= radius;
 
+    const tileInfo = isInside
+      ? this.villageGen.getVillageTileAt(
+          tx,
+          ty,
+          voronoi.cellId,
+          voronoi.centerCol,
+          voronoi.centerRow,
+          plazaX,
+          plazaY
+        )
+      : undefined;
+
     return {
       cellId: voronoi.cellId,
       centerCol: voronoi.centerCol,
@@ -364,6 +420,9 @@ export class WorldNoise {
       hasVillage: true,
       isPlaza,
       isInside,
+      villageName: tileInfo?.villageName,
+      district: tileInfo?.district,
+      tileInfo,
     };
   }
 }
@@ -457,6 +516,83 @@ export function getNoiseVisualTile(worldNoise: WorldNoise, tx: number, ty: numbe
   // 1. Village structure check
   const village = worldNoise.getVillageAt(tx, ty);
   if (village && village.isInside) {
+    const tile = village.tileInfo;
+
+    // A. Village Props (Well, Lanterns, Benches, Crates)
+    if (tile?.prop) {
+      const isPlazaProp = tile.prop.type === 'well';
+      return {
+        color: tile.color ?? 0x06b6d4,
+        hexColor: tile.hexColor ?? '#06b6d4',
+        label: `Village Prop (${tile.prop.label})`,
+        category: isPlazaProp ? 'plaza' : 'village',
+        isTree: false,
+        isPlaza: isPlazaProp,
+        isVillage: true,
+        isWater: false,
+        biome: 'meadow_plains',
+      };
+    }
+
+    // B. Pre-Built House Models (Grand Manor, Red Cottage, Blue Cottage, Outpost, Watchtower)
+    if (tile?.house) {
+      return {
+        color: tile.color ?? 0x78350f,
+        hexColor: tile.hexColor ?? '#78350f',
+        label: `House: ${tile.house.model.name} [${tile.housePart?.toUpperCase() ?? 'BUILDING'}]`,
+        category: 'village',
+        isTree: false,
+        isPlaza: false,
+        isVillage: true,
+        isWater: false,
+        biome: 'meadow_plains',
+      };
+    }
+
+    // C. Pavements & Streets (Cobblestone Plaza, Main Streets, House Walkways)
+    if (tile?.isPavement) {
+      if (tile.pavementType === 'plaza') {
+        return {
+          color: 0xe11d48,
+          hexColor: '#e11d48',
+          label: 'Village Plaza',
+          category: 'plaza',
+          isTree: false,
+          isPlaza: true,
+          isVillage: true,
+          isWater: false,
+          biome: 'meadow_plains',
+        };
+      }
+      return {
+        color: 0xcbd5e1,
+        hexColor: '#cbd5e1',
+        label: tile.pavementType === 'main_street' ? 'Village Main Street' : 'House Walkway',
+        category: 'village',
+        isTree: false,
+        isPlaza: false,
+        isVillage: true,
+        isWater: false,
+        biome: 'meadow_plains',
+      };
+    }
+
+    // D. Backyard Garden Yards
+    if (tile?.district === 'yard') {
+      return {
+        color: 0x84cc16,
+        hexColor: '#84cc16',
+        label: 'Village Garden Yard',
+        category: 'village',
+        isTree: false,
+        isPlaza: false,
+        isVillage: true,
+        isWater: false,
+        biome: 'meadow_plains',
+      };
+    }
+
+    // E. Fallback Plaza Square
     if (village.isPlaza) {
       return {
         color: 0xe11d48,
@@ -470,10 +606,11 @@ export function getNoiseVisualTile(worldNoise: WorldNoise, tx: number, ty: numbe
         biome: 'meadow_plains',
       };
     }
+
     return {
       color: 0x8b5cf6,
       hexColor: '#8b5cf6',
-      label: 'Village Community',
+      label: `Village Territory (${village.villageName ?? 'Community'})`,
       category: 'village',
       isTree: false,
       isPlaza: false,
