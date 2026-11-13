@@ -66,6 +66,9 @@ interface GameState {
     humidity: number;
     erosion: number;
     forestDensity: number;
+    forestZone?: string;
+    isCanopy?: boolean;
+    treeMaturity?: string;
   } | null;
 
   // Actions

@@ -452,6 +452,7 @@ export class World {
       const visual = getNoiseVisualTile(this.worldNoise, playerTileX, playerTileY);
       const village = this.worldNoise.getVillageAt(playerTileX, playerTileY);
       const tree = this.worldNoise.getTreeAt(playerTileX, playerTileY);
+      const forest = this.worldNoise.getForestAt(playerTileX, playerTileY);
       useGameStore.getState().setActiveTileNoise({
         tx: playerTileX,
         ty: playerTileY,
@@ -467,7 +468,10 @@ export class World {
         temperature: this.worldNoise.sampleTemperature(playerTileX, playerTileY),
         humidity: this.worldNoise.sampleHumidity(playerTileX, playerTileY),
         erosion: this.worldNoise.sampleErosion(playerTileX, playerTileY),
-        forestDensity: this.worldNoise.sampleForestDensity(playerTileX, playerTileY),
+        forestDensity: forest.density,
+        forestZone: forest.zone,
+        isCanopy: forest.isCanopy,
+        treeMaturity: tree?.maturity,
       });
     }
 

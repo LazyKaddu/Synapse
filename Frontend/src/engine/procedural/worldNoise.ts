@@ -5,8 +5,14 @@
  */
 
 import { hash2D, fbm2D, voronoi2D, type VoronoiResult } from './noise.ts';
+import {
+  ForestSpreadGenerator,
+  type ForestTileInfo,
+  type TreeMaturity,
+  type ForestTreeInfo,
+} from './forestGen.ts';
 
-export type { VoronoiResult };
+export type { VoronoiResult, ForestTileInfo, TreeMaturity, ForestTreeInfo };
 
 /**
  * 5 Canonical World Biome Types.
@@ -82,6 +88,8 @@ export interface TreePlacement {
   readonly row: number;
   readonly variant: number;
   readonly density: number;
+  readonly maturity?: TreeMaturity;
+  readonly canopyRadius?: number;
 }
 
 /**
@@ -136,6 +144,7 @@ export class WorldNoise {
   readonly masterSeed: number;
   readonly seed: number;
   readonly seeds: SubSeeds;
+  readonly forestSpread: ForestSpreadGenerator;
 
   constructor(configOrSeed: number | WorldNoiseConfig = 0) {
     if (typeof configOrSeed === 'number') {
@@ -154,6 +163,12 @@ export class WorldNoise {
     this.masterSeed = this.config.seed;
     this.seed = this.config.seed;
     this.seeds = deriveSubSeeds(this.masterSeed);
+    this.forestSpread = new ForestSpreadGenerator({
+      seed: this.masterSeed,
+      macroScale: this.config.forestDensityScale,
+      edgeThreshold: this.config.forestThreshold,
+      treeMinSpacing: this.config.treeMinSpacing,
+    });
   }
 
   // --- Raw Channel Samplers ---
@@ -259,81 +274,41 @@ export class WorldNoise {
 
   /**
    * Evaluates whether a tree trunk is placed at integer tile coordinate (tx, ty).
-   * Enforces forest density thresholding and deterministic jittered anchor placement
-   * with guaranteed minimum spacing to produce natural clustered forests.
+   * Delegates to the Natural ForestSpreadGenerator with density-adaptive spacing,
+   * maturity hierarchy, and water suppression.
    */
   getTreeAt(tx: number, ty: number): TreePlacement | null {
-    const minSpacing = this.config.treeMinSpacing;
-    const cellSize = Math.max(2, Math.ceil(minSpacing));
-
-    const cellX = Math.floor(tx / cellSize);
-    const cellY = Math.floor(ty / cellSize);
-
-    // Candidate anchor within this grid cell
-    const jx = Math.floor(hash2D(cellX, cellY, this.seeds.treeScatter) * cellSize);
-    const jy = Math.floor(hash2D(cellX, cellY, this.seeds.treeScatter + 1) * cellSize);
-    const candX = cellX * cellSize + jx;
-    const candY = cellY * cellSize + jy;
-
-    if (candX !== tx || candY !== ty) {
-      return null;
-    }
-
-    // Water suppression: no trees underwater
     if (this.isWaterAt(tx, ty)) {
       return null;
     }
-
-    // Forest density clustering check
-    const density = this.sampleForestDensity(tx, ty);
-    if (density < this.config.forestThreshold) {
+    const tree = this.forestSpread.getTreeAt(tx, ty);
+    if (!tree) {
       return null;
     }
-
-    // Minimum spacing conflict resolution against 3x3 neighboring cells
-    const myScore = hash2D(cellX, cellY, this.seeds.treeScatter + 2);
-
-    for (let ox = -1; ox <= 1; ox++) {
-      for (let oy = -1; oy <= 1; oy++) {
-        if (ox === 0 && oy === 0) continue;
-        const nx = cellX + ox;
-        const ny = cellY + oy;
-
-        const njx = Math.floor(hash2D(nx, ny, this.seeds.treeScatter) * cellSize);
-        const njy = Math.floor(hash2D(nx, ny, this.seeds.treeScatter + 1) * cellSize);
-        const nCandX = nx * cellSize + njx;
-        const nCandY = ny * cellSize + njy;
-
-        const dist = Math.hypot(candX - nCandX, candY - nCandY);
-        if (dist < minSpacing) {
-          // Check if neighbor is a viable tree candidate
-          if (
-            !this.isWaterAt(nCandX, nCandY) &&
-            this.sampleForestDensity(nCandX, nCandY) >= this.config.forestThreshold
-          ) {
-            const nScore = hash2D(nx, ny, this.seeds.treeScatter + 2);
-            // Deterministic tie-breaker
-            if (
-              nScore > myScore ||
-              (nScore === myScore && (nx > cellX || (nx === cellX && ny > cellY)))
-            ) {
-              return null;
-            }
-          }
-        }
-      }
-    }
-
-    const variant = Math.floor(hash2D(tx, ty, this.seeds.treeScatter + 3) * 3);
-
     return {
       x: tx,
       y: ty,
       col: tx,
       row: ty,
-      variant,
-      density,
+      variant: tree.variant,
+      density: tree.density,
+      maturity: tree.maturity,
+      canopyRadius: tree.canopyRadius,
     };
+  }
+
+  /**
+   * Computes full ecological forest tile metadata at (tx, ty).
+   */
+  getForestAt(tx: number, ty: number): ForestTileInfo {
+    return this.forestSpread.getForestAt(tx, ty);
+  }
+
+  /**
+   * Returns true if (tx, ty) is covered by the overhead canopy of a nearby tree.
+   */
+  isCanopyAt(tx: number, ty: number): boolean {
+    return !this.isWaterAt(tx, ty) && this.forestSpread.isCanopyAt(tx, ty);
   }
 
   /**
@@ -417,14 +392,14 @@ export const NOISE_PALETTE: readonly NoisePaletteEntry[] = Object.freeze([
     label: 'Forest Canopy',
     color: 0x15803d,
     hexColor: '#15803d',
-    description: 'Dense canopy or humid temperate woods',
+    description: 'Dense canopy, core old-growth, glades & edge woods',
   },
   {
     id: 'tree',
     label: 'Tree Trunk / Anchor',
     color: 0x064e3b,
     hexColor: '#064e3b',
-    description: 'Clustered tree inside forest (min spacing >= 2 tiles)',
+    description: 'Clustered tree trunk with maturity (Large, Medium, Small, Bush)',
   },
   {
     id: 'meadow_plains',
@@ -529,10 +504,27 @@ export function getNoiseVisualTile(worldNoise: WorldNoise, tx: number, ty: numbe
   // 3. Tree check (clustered within forests)
   const tree = worldNoise.getTreeAt(tx, ty);
   if (tree) {
+    const maturityLabel = tree.maturity ? ` [${tree.maturity.toUpperCase()}]` : '';
+    const color =
+      tree.maturity === 'large'
+        ? 0x022c22
+        : tree.maturity === 'small'
+          ? 0x047857
+          : tree.maturity === 'bush'
+            ? 0x10b981
+            : 0x064e3b;
+    const hexColor =
+      tree.maturity === 'large'
+        ? '#022c22'
+        : tree.maturity === 'small'
+          ? '#047857'
+          : tree.maturity === 'bush'
+            ? '#10b981'
+            : '#064e3b';
     return {
-      color: 0x064e3b,
-      hexColor: '#064e3b',
-      label: `Tree (Variant ${tree.variant + 1})`,
+      color,
+      hexColor,
+      label: `Tree${maturityLabel} (Variant ${tree.variant + 1})`,
       category: 'tree',
       isTree: true,
       isPlaza: false,
@@ -545,7 +537,47 @@ export function getNoiseVisualTile(worldNoise: WorldNoise, tx: number, ty: numbe
   // 4. Canonical Biomes
   const biome = worldNoise.getBiomeAt(tx, ty);
   switch (biome) {
-    case 'forest':
+    case 'forest': {
+      const forest = worldNoise.getForestAt(tx, ty);
+      if (forest.zone === 'core') {
+        return {
+          color: 0x0f5132,
+          hexColor: '#0f5132',
+          label: 'Forest Core (Dense Woods)',
+          category: 'forest',
+          isTree: false,
+          isPlaza: false,
+          isVillage: false,
+          isWater: false,
+          biome,
+        };
+      }
+      if (forest.zone === 'clearing') {
+        return {
+          color: 0x86efac,
+          hexColor: '#86efac',
+          label: 'Sunlit Glade (Clearing)',
+          category: 'forest',
+          isTree: false,
+          isPlaza: false,
+          isVillage: false,
+          isWater: false,
+          biome,
+        };
+      }
+      if (forest.zone === 'edge') {
+        return {
+          color: 0x65a30d,
+          hexColor: '#65a30d',
+          label: 'Forest Edge (Ecotone)',
+          category: 'forest',
+          isTree: false,
+          isPlaza: false,
+          isVillage: false,
+          isWater: false,
+          biome,
+        };
+      }
       return {
         color: 0x15803d,
         hexColor: '#15803d',
@@ -557,6 +589,7 @@ export function getNoiseVisualTile(worldNoise: WorldNoise, tx: number, ty: numbe
         isWater: false,
         biome,
       };
+    }
     case 'desert_arid':
       return {
         color: 0xeab308,
