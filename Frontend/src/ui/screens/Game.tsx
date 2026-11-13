@@ -11,6 +11,7 @@ import {
 import {
   type AssetLibraryLoader,
   GameLoop,
+  NOISE_PALETTE,
   StackedPrefabCodec,
   type World,
 } from '../../engine/index.ts';
@@ -36,6 +37,7 @@ export default function Game(): JSX.Element {
   const worldRef = useRef<World | null>(null);
   const [assetLibrary, setAssetLibrary] = useState<AssetLibraryLoader | null>(null);
   const [initError, setInitError] = useState<string | null>(null);
+  const [showLegend, setShowLegend] = useState(true);
 
   // Zustand world & culling subscriptions
   const worldSeed = useGameStore((state) => state.worldSeed);
@@ -46,9 +48,15 @@ export default function Game(): JSX.Element {
   const cullingTelemetry = useGameStore((state) => state.cullingTelemetry);
   const showDebugOverlay = useGameStore((state) => state.showDebugOverlay);
   const inspectInsetCulling = useGameStore((state) => state.inspectInsetCulling);
+  const showNoiseVisualizer = useGameStore((state) => state.showNoiseVisualizer);
+  const zoomLevel = useGameStore((state) => state.zoomLevel);
+  const activeTileNoise = useGameStore((state) => state.activeTileNoise);
 
   const toggleDebugOverlay = useGameStore((state) => state.toggleDebugOverlay);
   const toggleInspectInsetCulling = useGameStore((state) => state.toggleInspectInsetCulling);
+  const toggleNoiseVisualizer = useGameStore((state) => state.toggleNoiseVisualizer);
+  const cycleZoomLevel = useGameStore((state) => state.cycleZoomLevel);
+  const setZoomLevel = useGameStore((state) => state.setZoomLevel);
   const setBufferMargin = useGameStore((state) => state.setBufferMargin);
   const setWorldSeed = useGameStore((state) => state.setWorldSeed);
 
@@ -159,6 +167,24 @@ export default function Game(): JSX.Element {
         return;
       }
 
+      if (!isEditorOpen && !inTextInput && e.code === 'KeyV' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        toggleNoiseVisualizer();
+        return;
+      }
+
+      if (!isEditorOpen && !inTextInput && e.code === 'KeyZ' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        cycleZoomLevel();
+        return;
+      }
+
+      if (!isEditorOpen && !inTextInput && e.code === 'KeyL' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setShowLegend((prev) => !prev);
+        return;
+      }
+
       if (!isEditorOpen && activePlacement && e.key === 'Escape') {
         e.preventDefault();
         cancelWorldPlacement();
@@ -186,6 +212,8 @@ export default function Game(): JSX.Element {
     openEditor,
     cancelWorldPlacement,
     setActivePlacementAnchorZ,
+    toggleNoiseVisualizer,
+    cycleZoomLevel,
   ]);
 
   const handleCanvasPointerMove = (e: ReactPointerEvent<HTMLDivElement>): void => {
@@ -569,6 +597,117 @@ export default function Game(): JSX.Element {
           }}
         />
 
+        <div
+          style={{
+            margin: '8px 0',
+            borderTop: '1px solid rgba(255, 255, 255, 0.1)',
+          }}
+        />
+
+        {/* Noise Visualizer & Multi-Noise Channels Inspector */}
+        <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6, color: '#e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span>Noise Engine Inspector</span>
+          <button
+            type="button"
+            onClick={toggleNoiseVisualizer}
+            style={{
+              background: showNoiseVisualizer ? '#22c55e' : 'rgba(255,255,255,0.1)',
+              color: showNoiseVisualizer ? '#0f172a' : '#cbd5e1',
+              border: 'none',
+              borderRadius: 4,
+              padding: '2px 8px',
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            {showNoiseVisualizer ? 'Colors: ON [V]' : 'Tiles: ON [V]'}
+          </button>
+        </div>
+
+        {activeTileNoise && (
+          <div style={{ marginBottom: 8, background: 'rgba(0,0,0,0.25)', padding: '6px 8px', borderRadius: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+              <span
+                style={{
+                  display: 'inline-block',
+                  width: 12,
+                  height: 12,
+                  borderRadius: 3,
+                  backgroundColor: activeTileNoise.hexColor,
+                  border: '1px solid rgba(255,255,255,0.4)',
+                }}
+              />
+              <span style={{ fontWeight: 600, fontSize: 12, color: '#f8fafc' }}>
+                {activeTileNoise.label}
+              </span>
+            </div>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'auto 1fr',
+                gap: '2px 8px',
+                fontSize: 11,
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              <span style={{ color: '#94a3b8' }}>Continental:</span>
+              <span style={{ color: activeTileNoise.isWater ? '#38bdf8' : '#e2e8f0' }}>
+                {activeTileNoise.continentalness.toFixed(3)} {activeTileNoise.isWater ? '(Water Basin)' : ''}
+              </span>
+
+              <span style={{ color: '#94a3b8' }}>Forest Density:</span>
+              <span style={{ color: activeTileNoise.hasTree ? '#4ade80' : '#e2e8f0' }}>
+                {activeTileNoise.forestDensity.toFixed(3)} {activeTileNoise.hasTree ? '(Tree Trunk)' : ''}
+              </span>
+
+              <span style={{ color: '#94a3b8' }}>Temp / Humidity:</span>
+              <span style={{ color: '#fbbf24' }}>
+                {activeTileNoise.temperature.toFixed(2)} / {activeTileNoise.humidity.toFixed(2)}
+              </span>
+
+              <span style={{ color: '#94a3b8' }}>Erosion Relief:</span>
+              <span style={{ color: '#cbd5e1' }}>
+                {activeTileNoise.erosion.toFixed(3)}
+              </span>
+
+              {activeTileNoise.isVillage && (
+                <>
+                  <span style={{ color: '#94a3b8' }}>Community:</span>
+                  <span style={{ color: activeTileNoise.isPlaza ? '#f43f5e' : '#c084fc', fontWeight: 600 }}>
+                    {activeTileNoise.isPlaza ? 'Plaza Center' : 'Village District'}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, fontSize: 11 }}>
+          <span style={{ color: '#94a3b8' }}>Zoom Level [Z]:</span>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {[1.0, 0.5, 0.25].map((z) => (
+              <button
+                key={z}
+                type="button"
+                onClick={() => setZoomLevel(z)}
+                style={{
+                  background: zoomLevel === z ? '#38bdf8' : 'rgba(255,255,255,0.1)',
+                  color: zoomLevel === z ? '#0f172a' : '#cbd5e1',
+                  border: 'none',
+                  borderRadius: 4,
+                  padding: '2px 6px',
+                  fontSize: 10,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                {z}x
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <button
             type="button"
@@ -650,9 +789,94 @@ export default function Game(): JSX.Element {
           <kbd style={kbdStyle}>Shift</kbd> Sprint (480 px/s)
         </div>
         <div>
-          <kbd style={kbdStyle}>C</kbd> Debug Overlay · <kbd style={kbdStyle}>I</kbd> Inset Culling ·{' '}
-          <kbd style={kbdStyle}>B</kbd> Building Editor
+          <kbd style={kbdStyle}>V</kbd> Noise Colors · <kbd style={kbdStyle}>Z</kbd> Zoom ·{' '}
+          <kbd style={kbdStyle}>C</kbd> Debug Overlay · <kbd style={kbdStyle}>B</kbd> Building Editor
         </div>
+      </div>
+
+      {/* Top Right HUD: Noise Visual Palette Legend */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 16,
+          right: 16,
+          backgroundColor: 'rgba(15, 23, 42, 0.90)',
+          backdropFilter: 'blur(8px)',
+          border: '1px solid rgba(255, 255, 255, 0.12)',
+          borderRadius: 8,
+          padding: showLegend ? '12px 14px' : '8px 12px',
+          color: '#f8fafc',
+          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.3)',
+          pointerEvents: 'auto',
+          maxWidth: 300,
+          zIndex: 10,
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            marginBottom: showLegend ? 10 : 0,
+          }}
+        >
+          <span style={{ fontWeight: 600, fontSize: 13, color: '#38bdf8' }}>
+            Noise World Palette
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowLegend((prev) => !prev)}
+            style={{
+              background: 'rgba(255,255,255,0.08)',
+              color: '#94a3b8',
+              border: 'none',
+              borderRadius: 4,
+              padding: '2px 6px',
+              fontSize: 10,
+              cursor: 'pointer',
+            }}
+          >
+            {showLegend ? 'Collapse' : 'Expand'}
+          </button>
+        </div>
+
+        {showLegend && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {NOISE_PALETTE.map((entry) => (
+              <div
+                key={entry.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 8,
+                  fontSize: 12,
+                }}
+              >
+                <span
+                  style={{
+                    display: 'inline-block',
+                    width: 14,
+                    height: 14,
+                    minWidth: 14,
+                    borderRadius: 3,
+                    backgroundColor: entry.hexColor,
+                    marginTop: 2,
+                    boxShadow: '0 0 0 1px rgba(0,0,0,0.5)',
+                  }}
+                />
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <span style={{ fontWeight: 600, color: '#f1f5f9', lineHeight: 1.2 }}>
+                    {entry.label}
+                  </span>
+                  <span style={{ fontSize: 10, color: '#94a3b8', lineHeight: 1.2 }}>
+                    {entry.description}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {isEditorOpen && (
