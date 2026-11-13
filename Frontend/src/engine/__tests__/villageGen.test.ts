@@ -297,3 +297,4 @@ describe('VillageGenerator: 7. Fast O(1) Spatial Tile Query', () => {
     assert.strictEqual(outsideTile.isWalkable, true);
   });
 });
+

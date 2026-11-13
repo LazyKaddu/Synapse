@@ -785,3 +785,4 @@ export class VillageGenerator {
     );
   }
 }
+
