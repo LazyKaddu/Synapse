@@ -14,6 +14,7 @@ import {
   type StackedPrefabData,
 } from './prefab/PrefabCodec.ts';
 import { getTileAt, RENDER_TILE_SIZE, RENDER_SCALE, type WorldTile } from './procedural/worldGen.ts';
+import { WorldNoise, getNoiseVisualTile } from './procedural/worldNoise.ts';
 import { calculateTileBounds, type TileBounds } from './culling/looseCulling.ts';
 import { SpritePool, type CullingTelemetry } from './culling/spritePool.ts';
 import { useGameStore } from '../store/gameStore.ts';
@@ -51,6 +52,10 @@ export class World {
   private bufferMargin: number;
   private viewportWidth: number;
   private viewportHeight: number;
+  private showNoiseColors = true;
+  private zoomLevel = 1.0;
+  private worldNoise: WorldNoise;
+  private lastInspectedTile: { tx: number; ty: number } | null = null;
 
   private characterBox: Graphics;
   private debugGraphics: Graphics;
@@ -118,12 +123,21 @@ export class World {
     this.spritePool = new SpritePool<Sprite>({
       createItem: () => {
         const sprite = new Sprite();
-        sprite.scale.set(RENDER_SCALE);
         this.tileContainer.addChild(sprite);
         return sprite;
       },
       onActivate: (sprite: Sprite, tx: number, ty: number, tile: WorldTile) => {
-        sprite.texture = this.tilesetManager.getTexture(tile.col, tile.row);
+        if (this.showNoiseColors) {
+          const visual = getNoiseVisualTile(this.worldNoise, tx, ty);
+          sprite.texture = Texture.WHITE;
+          sprite.width = RENDER_TILE_SIZE - 1;
+          sprite.height = RENDER_TILE_SIZE - 1;
+          sprite.tint = visual.color;
+        } else {
+          sprite.texture = this.tilesetManager.getTexture(tile.col, tile.row);
+          sprite.scale.set(RENDER_SCALE);
+          sprite.tint = 0xffffff;
+        }
         sprite.position.set(tx * RENDER_TILE_SIZE, ty * RENDER_TILE_SIZE);
         sprite.visible = true;
       },
@@ -156,16 +170,26 @@ export class World {
         state.showDebugOverlay !== this.showDebugOverlay ||
         state.inspectInsetCulling !== this.inspectInsetCulling ||
         state.bufferMargin !== this.bufferMargin;
+      const noiseColorsChanged = state.showNoiseVisualizer !== this.showNoiseColors;
+      const zoomChanged = state.zoomLevel !== this.zoomLevel;
 
       this.showDebugOverlay = state.showDebugOverlay;
       this.inspectInsetCulling = state.inspectInsetCulling;
       this.bufferMargin = state.bufferMargin;
       this.seed = state.worldSeed;
+      this.showNoiseColors = state.showNoiseVisualizer;
+      this.zoomLevel = state.zoomLevel;
 
       if (seedChanged) {
+        this.worldNoise = new WorldNoise(this.seed);
+      }
+      if (seedChanged || noiseColorsChanged || zoomChanged) {
         this.spritePool.clear();
       }
-      if ((seedChanged || overlayChanged) && !this.isDestroyed) {
+      if (
+        (seedChanged || overlayChanged || noiseColorsChanged || zoomChanged) &&
+        !this.isDestroyed
+      ) {
         this.updateCameraAndCulling();
       }
     });
@@ -176,6 +200,9 @@ export class World {
     this.inspectInsetCulling = currentStore.inspectInsetCulling;
     this.bufferMargin = currentStore.bufferMargin;
     this.seed = currentStore.worldSeed;
+    this.showNoiseColors = currentStore.showNoiseVisualizer;
+    this.zoomLevel = currentStore.zoomLevel;
+    this.worldNoise = new WorldNoise(this.seed);
   }
 
   /**
@@ -216,8 +243,8 @@ export class World {
     screenX: number,
     screenY: number
   ): { tileX: number; tileY: number; worldX: number; worldY: number } {
-    const rawWorldX = screenX - this.worldContainer.position.x;
-    const rawWorldY = screenY - this.worldContainer.position.y;
+    const rawWorldX = (screenX - this.worldContainer.position.x) / this.zoomLevel;
+    const rawWorldY = (screenY - this.worldContainer.position.y) / this.zoomLevel;
     const tileX = Math.floor(rawWorldX / RENDER_TILE_SIZE);
     const tileY = Math.floor(rawWorldY / RENDER_TILE_SIZE);
     return {
@@ -388,14 +415,17 @@ export class World {
   public updateCameraAndCulling(): void {
     if (!this.isInitialized || this.isDestroyed) return;
 
+    // Apply zoom scale to world container
+    this.worldContainer.scale.set(this.zoomLevel);
+
     // Center camera on player with integer pixel rounding
-    const cameraWorldX = Math.round(this.viewportWidth / 2 - this.playerX);
-    const cameraWorldY = Math.round(this.viewportHeight / 2 - this.playerY);
+    const cameraWorldX = Math.round(this.viewportWidth / 2 - this.playerX * this.zoomLevel);
+    const cameraWorldY = Math.round(this.viewportHeight / 2 - this.playerY * this.zoomLevel);
     this.worldContainer.position.set(cameraWorldX, cameraWorldY);
 
     const insetScale = this.showDebugOverlay && this.inspectInsetCulling ? 0.55 : 1.0;
-    const effectiveWidth = this.viewportWidth * insetScale;
-    const effectiveHeight = this.viewportHeight * insetScale;
+    const effectiveWidth = (this.viewportWidth / this.zoomLevel) * insetScale;
+    const effectiveHeight = (this.viewportHeight / this.zoomLevel) * insetScale;
 
     // Calculate loose culling bounds
     const bounds = calculateTileBounds(
@@ -409,6 +439,37 @@ export class World {
 
     // Update sprite pool
     this.spritePool.update(bounds, (tx, ty) => getTileAt(tx, ty, this.seed));
+
+    // Update active player tile noise telemetry
+    const playerTileX = Math.floor(this.playerX / RENDER_TILE_SIZE);
+    const playerTileY = Math.floor(this.playerY / RENDER_TILE_SIZE);
+    if (
+      !this.lastInspectedTile ||
+      this.lastInspectedTile.tx !== playerTileX ||
+      this.lastInspectedTile.ty !== playerTileY
+    ) {
+      this.lastInspectedTile = { tx: playerTileX, ty: playerTileY };
+      const visual = getNoiseVisualTile(this.worldNoise, playerTileX, playerTileY);
+      const village = this.worldNoise.getVillageAt(playerTileX, playerTileY);
+      const tree = this.worldNoise.getTreeAt(playerTileX, playerTileY);
+      useGameStore.getState().setActiveTileNoise({
+        tx: playerTileX,
+        ty: playerTileY,
+        label: visual.label,
+        category: visual.category,
+        hexColor: visual.hexColor,
+        biome: visual.biome,
+        isWater: visual.isWater,
+        hasTree: !!tree,
+        isVillage: !!(village && village.isInside),
+        isPlaza: !!(village && village.isPlaza),
+        continentalness: this.worldNoise.sampleContinentalness(playerTileX, playerTileY),
+        temperature: this.worldNoise.sampleTemperature(playerTileX, playerTileY),
+        humidity: this.worldNoise.sampleHumidity(playerTileX, playerTileY),
+        erosion: this.worldNoise.sampleErosion(playerTileX, playerTileY),
+        forestDensity: this.worldNoise.sampleForestDensity(playerTileX, playerTileY),
+      });
+    }
 
     // Telemetry (push to React store only on change)
     const telemetry = this.spritePool.getTelemetry(bounds);
