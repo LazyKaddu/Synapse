@@ -656,10 +656,47 @@ export default function Game(): JSX.Element {
                 {activeTileNoise.continentalness.toFixed(3)} {activeTileNoise.isWater ? '(Water Basin)' : ''}
               </span>
 
-              <span style={{ color: '#94a3b8' }}>Forest Density:</span>
+              <span style={{ color: '#94a3b8' }}>Forest Ecology:</span>
               <span style={{ color: activeTileNoise.hasTree ? '#4ade80' : '#e2e8f0' }}>
-                {activeTileNoise.forestDensity.toFixed(3)} {activeTileNoise.hasTree ? '(Tree Trunk)' : ''}
+                {activeTileNoise.forestDensity.toFixed(3)}
+                {activeTileNoise.hasTree && (
+                  <span style={{ color: '#86efac', fontWeight: 600, marginLeft: 4 }}>
+                    🌲 Trunk [{activeTileNoise.treeMaturity?.toUpperCase() ?? 'TREE'}]
+                  </span>
+                )}
               </span>
+
+              {activeTileNoise.forestZone && activeTileNoise.forestZone !== 'none' && (
+                <>
+                  <span style={{ color: '#94a3b8' }}>Forest Zone:</span>
+                  <span
+                    style={{
+                      fontWeight: 600,
+                      color:
+                        activeTileNoise.forestZone === 'core'
+                          ? '#4ade80'
+                          : activeTileNoise.forestZone === 'clearing'
+                            ? '#fef08a'
+                            : activeTileNoise.forestZone === 'edge'
+                              ? '#a3e635'
+                              : '#86efac',
+                    }}
+                  >
+                    {activeTileNoise.forestZone === 'core'
+                      ? 'Core (Old-Growth)'
+                      : activeTileNoise.forestZone === 'clearing'
+                        ? 'Sunlit Glade (Clearing)'
+                        : activeTileNoise.forestZone === 'edge'
+                          ? 'Edge (Ecotone)'
+                          : 'Interior Woods'}
+                  </span>
+
+                  <span style={{ color: '#94a3b8' }}>Canopy Cover:</span>
+                  <span style={{ color: activeTileNoise.isCanopy ? '#86efac' : '#cbd5e1' }}>
+                    {activeTileNoise.isCanopy ? '🌿 Shaded Canopy' : '☀️ Open Sky'}
+                  </span>
+                </>
+              )}
 
               <span style={{ color: '#94a3b8' }}>Temp / Humidity:</span>
               <span style={{ color: '#fbbf24' }}>
