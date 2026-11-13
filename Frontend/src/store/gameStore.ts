@@ -48,6 +48,25 @@ interface GameState {
   cullingTelemetry: { visibleCount: number; loadedCount: number; pooledCount: number };
   showDebugOverlay: boolean;
   inspectInsetCulling: boolean;
+  showNoiseVisualizer: boolean;
+  zoomLevel: number;
+  activeTileNoise: {
+    tx: number;
+    ty: number;
+    label: string;
+    category: string;
+    hexColor: string;
+    biome: string;
+    isWater: boolean;
+    hasTree: boolean;
+    isVillage: boolean;
+    isPlaza: boolean;
+    continentalness: number;
+    temperature: number;
+    humidity: number;
+    erosion: number;
+    forestDensity: number;
+  } | null;
 
   // Actions
   setConnected: (connected: boolean) => void;
@@ -61,6 +80,11 @@ interface GameState {
   toggleDebugOverlay: () => void;
   setShowDebugOverlay: (show: boolean) => void;
   toggleInspectInsetCulling: () => void;
+  toggleNoiseVisualizer: () => void;
+  setShowNoiseVisualizer: (show: boolean) => void;
+  setZoomLevel: (zoom: number) => void;
+  cycleZoomLevel: () => void;
+  setActiveTileNoise: (info: GameState['activeTileNoise']) => void;
   
   setPlayer: (player: Player) => void;
   setPlayerId: (id: string) => void;
@@ -149,6 +173,9 @@ const initialState = {
   cullingTelemetry: { visibleCount: 0, loadedCount: 0, pooledCount: 0 },
   showDebugOverlay: false,
   inspectInsetCulling: false,
+  showNoiseVisualizer: true,
+  zoomLevel: 1.0,
+  activeTileNoise: null,
 };
 
 export const useGameStore = create<GameState>()(
@@ -177,6 +204,16 @@ export const useGameStore = create<GameState>()(
         inspectInsetCulling: !state.inspectInsetCulling,
         showDebugOverlay: !state.inspectInsetCulling ? true : state.showDebugOverlay,
       })),
+    toggleNoiseVisualizer: () =>
+      set((state) => ({ showNoiseVisualizer: !state.showNoiseVisualizer })),
+    setShowNoiseVisualizer: (show) => set({ showNoiseVisualizer: show }),
+    setZoomLevel: (zoom) => set({ zoomLevel: zoom }),
+    cycleZoomLevel: () =>
+      set((state) => {
+        const next = state.zoomLevel === 1.0 ? 0.5 : state.zoomLevel === 0.5 ? 0.25 : 1.0;
+        return { zoomLevel: next };
+      }),
+    setActiveTileNoise: (info) => set({ activeTileNoise: info }),
 
     // Connection
     setConnected: (connected) => set({ connected, connecting: false }),
