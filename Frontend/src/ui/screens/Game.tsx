@@ -710,10 +710,42 @@ export default function Game(): JSX.Element {
 
               {activeTileNoise.isVillage && (
                 <>
-                  <span style={{ color: '#94a3b8' }}>Community:</span>
-                  <span style={{ color: activeTileNoise.isPlaza ? '#f43f5e' : '#c084fc', fontWeight: 600 }}>
-                    {activeTileNoise.isPlaza ? 'Plaza Center' : 'Village District'}
+                  <span style={{ color: '#94a3b8' }}>Village:</span>
+                  <span style={{ color: '#c084fc', fontWeight: 600 }}>
+                    {activeTileNoise.villageName ? activeTileNoise.villageName : 'Settlement'}
+                    {activeTileNoise.isPlaza ? ' (Plaza Center)' : ''}
                   </span>
+
+                  {activeTileNoise.villageBuilding && (
+                    <>
+                      <span style={{ color: '#94a3b8' }}>Building:</span>
+                      <span style={{ color: '#fbbf24', fontWeight: 600 }}>
+                        {activeTileNoise.villageBuilding} [{activeTileNoise.villageHousePart?.toUpperCase() ?? 'STRUCTURE'}]
+                      </span>
+                    </>
+                  )}
+
+                  {activeTileNoise.isVillagePavement && (
+                    <>
+                      <span style={{ color: '#94a3b8' }}>Pavement:</span>
+                      <span style={{ color: '#e2e8f0', fontWeight: 600 }}>
+                        {activeTileNoise.villageDistrict === 'plaza'
+                          ? 'Cobblestone Town Square'
+                          : activeTileNoise.villageDistrict === 'main_street'
+                            ? 'Main Cobblestone Street'
+                            : 'House Walkway'}
+                      </span>
+                    </>
+                  )}
+
+                  {activeTileNoise.villageProp && (
+                    <>
+                      <span style={{ color: '#94a3b8' }}>Town Prop:</span>
+                      <span style={{ color: '#38bdf8', fontWeight: 600 }}>
+                        {activeTileNoise.villageProp}
+                      </span>
+                    </>
+                  )}
                 </>
               )}
             </div>
