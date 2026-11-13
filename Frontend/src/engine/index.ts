@@ -4,6 +4,7 @@ export * from './GameLoop.ts';
 export * from './tileset/tileset.ts';
 export * from './procedural/noise.ts';
 export * from './procedural/forestGen.ts';
+export * from './procedural/villageGen.ts';
 export * from './procedural/worldNoise.ts';
 export * from './procedural/worldGen.ts';
 export * from './culling/looseCulling.ts';
