@@ -79,3 +79,70 @@ export function fbm2D(
 
   return maxValue > 0 ? total / maxValue : 0;
 }
+
+/**
+ * Result structure returned by Voronoi 2D evaluation.
+ */
+export interface VoronoiResult {
+  readonly d1: number;
+  readonly d2: number;
+  readonly cellId: number;
+  readonly centerCol: number;
+  readonly centerRow: number;
+}
+
+/**
+ * 2D Cellular / Voronoi noise evaluated over 3x3 neighbor grid cells.
+ * Uses 32-bit integer grid hashing (hash2D) to place deterministic feature points
+ * within each cell and computes Euclidean distances to the 1st (d1) and 2nd (d2) nearest neighbors.
+ * Guarantees d1 <= d2, cellId consistency across cell domain, and bitwise stability.
+ */
+export function voronoi2D(x: number, y: number, seed: number): VoronoiResult {
+  const iX = Math.floor(x);
+  const iY = Math.floor(y);
+
+  let d1 = Infinity;
+  let d2 = Infinity;
+  let centerCol = 0;
+  let centerRow = 0;
+
+  const iseed = seed | 0;
+
+  for (let ox = -1; ox <= 1; ox++) {
+    for (let oy = -1; oy <= 1; oy++) {
+      const cx = iX + ox;
+      const cy = iY + oy;
+
+      // Deterministic feature point inside cell (cx, cy)
+      const px = cx + hash2D(cx, cy, iseed);
+      const py = cy + hash2D(cx, cy, (iseed ^ 0x9e3779b9) | 0);
+
+      const dx = x - px;
+      const dy = y - py;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist < d1) {
+        d2 = d1;
+        d1 = dist;
+        centerCol = cx;
+        centerRow = cy;
+      } else if (dist < d2) {
+        d2 = dist;
+      }
+    }
+  }
+
+  // Derive 32-bit unsigned cellId from closest cell's grid coordinates
+  let h = (iseed ^ Math.imul(centerCol | 0, 0x165667b1) ^ Math.imul(centerRow | 0, 0x27d4eb2f)) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 0x4f4d29a1);
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
+  h = (h ^ (h >>> 13)) >>> 0;
+
+  return {
+    d1,
+    d2,
+    cellId: h,
+    centerCol,
+    centerRow,
+  };
+}
