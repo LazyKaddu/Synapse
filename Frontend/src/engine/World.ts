@@ -17,6 +17,7 @@ import { getTileAt, RENDER_TILE_SIZE, RENDER_SCALE, type WorldTile } from './pro
 import { WorldNoise, getNoiseVisualTile } from './procedural/worldNoise.ts';
 import { calculateTileBounds, type TileBounds } from './culling/looseCulling.ts';
 import { SpritePool, type CullingTelemetry } from './culling/spritePool.ts';
+import { CollisionEngine, type WorldCollider, type AABB } from './collision/index.ts';
 import { useGameStore } from '../store/gameStore.ts';
 
 export interface WorldConfig {
@@ -46,6 +47,12 @@ export class World {
   private readonly baseSpeed = 240; // px/sec (3.75 tiles/sec)
   private readonly sprintSpeed = 480; // px/sec (7.5 tiles/sec)
   private readonly keysDown = new Set<string>();
+
+  // Collision & Physics
+  public collisionEngine: CollisionEngine;
+  public readonly playerHalfSize = 14; // 28x28 hitbox centered in 32x32 character sprite
+  public isColliding = false;
+  public lastCollider?: WorldCollider;
 
   // Configuration and dimensions
   private seed: number;
@@ -182,6 +189,16 @@ export class World {
 
       if (seedChanged) {
         this.worldNoise = new WorldNoise(this.seed);
+        this.collisionEngine = new CollisionEngine(this.worldNoise);
+        const safe = this.collisionEngine.findSafeSpawn(
+          this.playerX,
+          this.playerY,
+          this.playerHalfSize,
+          this.playerHalfSize
+        );
+        this.playerX = safe.x;
+        this.playerY = safe.y;
+        this.characterBox.position.set(this.playerX, this.playerY);
       }
       if (seedChanged || noiseColorsChanged || zoomChanged) {
         this.spritePool.clear();
@@ -203,6 +220,7 @@ export class World {
     this.showNoiseColors = currentStore.showNoiseVisualizer;
     this.zoomLevel = currentStore.zoomLevel;
     this.worldNoise = new WorldNoise(this.seed);
+    this.collisionEngine = new CollisionEngine(this.worldNoise);
   }
 
   /**
@@ -215,6 +233,18 @@ export class World {
     ]);
     if (this.isDestroyed) return;
     this.isInitialized = true;
+
+    // Verify initial safe spawn (anti-stuck solver)
+    const safe = this.collisionEngine.findSafeSpawn(
+      this.playerX,
+      this.playerY,
+      this.playerHalfSize,
+      this.playerHalfSize
+    );
+    this.playerX = safe.x;
+    this.playerY = safe.y;
+    this.characterBox.position.set(this.playerX, this.playerY);
+
     this.updateCameraAndCulling();
   }
 
@@ -395,12 +425,27 @@ export class World {
       const isSprinting = this.keysDown.has('ShiftLeft') || this.keysDown.has('ShiftRight');
       const speed = isSprinting ? this.sprintSpeed : this.baseSpeed;
 
-      this.playerX += dx * speed * dt;
-      this.playerY += dy * speed * dt;
+      const resolution = this.collisionEngine.resolveMovement(
+        this.playerX,
+        this.playerY,
+        dx,
+        dy,
+        speed,
+        dt,
+        this.playerHalfSize,
+        this.playerHalfSize
+      );
+
+      this.playerX = resolution.newX;
+      this.playerY = resolution.newY;
+      this.isColliding = resolution.xBlocked || resolution.yBlocked;
+      this.lastCollider = resolution.collider;
       this.facingAngle = Math.atan2(dy, dx);
 
       // Sync player coordinates with store
       useGameStore.getState().setPlayerCoordinates(this.playerX, this.playerY, RENDER_TILE_SIZE);
+    } else {
+      this.isColliding = false;
     }
 
     // Update character placeholder box position and facing rotation in world space
@@ -478,6 +523,8 @@ export class World {
         villageHousePart: village?.tileInfo?.housePart,
         villageProp: village?.tileInfo?.prop?.label,
         isVillagePavement: village?.tileInfo?.isPavement,
+        isColliding: this.isColliding,
+        collidedWith: this.lastCollider?.label,
       });
     }
 
@@ -519,12 +566,45 @@ export class World {
     this.debugGraphics.rect(bufLeft, bufTop, bufWidth, bufHeight);
     this.debugGraphics.stroke({ color: 0xf59e0b, width: 2, alpha: 0.8 });
 
-    // 3. Center crosshair at player position
-    this.debugGraphics.moveTo(this.playerX - 12, this.playerY);
-    this.debugGraphics.lineTo(this.playerX + 12, this.playerY);
-    this.debugGraphics.moveTo(this.playerX, this.playerY - 12);
-    this.debugGraphics.lineTo(this.playerX, this.playerY + 12);
-    this.debugGraphics.stroke({ color: 0xef4444, width: 2, alpha: 1.0 });
+    // 3. Draw Player Collision Hitbox AABB
+    const hw = this.playerHalfSize;
+    const hh = this.playerHalfSize;
+    this.debugGraphics.rect(this.playerX - hw, this.playerY - hh, hw * 2, hh * 2);
+    this.debugGraphics.stroke({
+      color: this.isColliding ? 0xef4444 : 0x22c55e,
+      width: 2,
+      alpha: 1.0,
+    });
+
+    // 4. Center crosshair at player position
+    this.debugGraphics.moveTo(this.playerX - 10, this.playerY);
+    this.debugGraphics.lineTo(this.playerX + 10, this.playerY);
+    this.debugGraphics.moveTo(this.playerX, this.playerY - 10);
+    this.debugGraphics.lineTo(this.playerX, this.playerY + 10);
+    this.debugGraphics.stroke({ color: 0xffffff, width: 1.5, alpha: 0.9 });
+
+    // 5. Draw Solid Colliders in Viewport Bounds
+    const viewAABB: AABB = {
+      minX: bounds.minVisX * RENDER_TILE_SIZE,
+      minY: bounds.minVisY * RENDER_TILE_SIZE,
+      maxX: (bounds.maxVisX + 1) * RENDER_TILE_SIZE,
+      maxY: (bounds.maxVisY + 1) * RENDER_TILE_SIZE,
+    };
+    const colliders = this.collisionEngine.getCollidersInArea(viewAABB);
+    for (const c of colliders) {
+      const w = c.aabb.maxX - c.aabb.minX;
+      const h = c.aabb.maxY - c.aabb.minY;
+      this.debugGraphics.rect(c.aabb.minX, c.aabb.minY, w, h);
+      const color =
+        c.type === 'water'
+          ? 0x3b82f6
+          : c.type === 'tree_trunk'
+            ? 0x22c55e
+            : c.type === 'house_wall' || c.type === 'house_roof'
+              ? 0xf97316
+              : 0x06b6d4;
+      this.debugGraphics.stroke({ color, width: 1.5, alpha: 0.75 });
+    }
   }
 
   public resize(width: number, height: number): void {

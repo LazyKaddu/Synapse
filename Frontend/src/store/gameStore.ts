@@ -75,6 +75,8 @@ interface GameState {
     villageHousePart?: string;
     villageProp?: string;
     isVillagePavement?: boolean;
+    isColliding?: boolean;
+    collidedWith?: string;
   } | null;
 
   // Actions
