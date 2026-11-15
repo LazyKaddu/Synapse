@@ -748,6 +748,13 @@ export default function Game(): JSX.Element {
                   )}
                 </>
               )}
+
+              <span style={{ color: '#94a3b8' }}>Physics:</span>
+              <span style={{ color: activeTileNoise.isColliding ? '#f87171' : '#4ade80', fontWeight: 600 }}>
+                {activeTileNoise.isColliding
+                  ? `Blocked (${activeTileNoise.collidedWith ?? 'Obstacle'})`
+                  : 'Clear'}
+              </span>
             </div>
           </div>
         )}
