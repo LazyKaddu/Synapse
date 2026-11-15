@@ -362,3 +362,4 @@ export class CollisionEngine {
     return { x: preferredX, y: preferredY };
   }
 }
+
