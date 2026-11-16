@@ -12,4 +12,6 @@ pub use rest::{
     CharacterDto, CreateCharacterRequest, LoginRequest, LoginResponse, PrefabSummaryDto,
     RegisterRequest, WorldJoinRequest, WorldJoinResponse,
 };
-pub use social::SocialMessage;
+pub use social::{
+    ChatMessageDto, FriendDto, FriendRequestDto, GroupDto, GroupMemberDto, SocialMessage,
+};

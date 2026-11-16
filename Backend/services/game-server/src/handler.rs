@@ -1,4 +1,5 @@
 use crate::engine::{OutgoingMessage, PlayerSession, SpatialGrid};
+use crate::social::SocialManager;
 use axum::{
     extract::{
         ws::{Message, WebSocket},
@@ -25,6 +26,7 @@ pub struct ServerState {
     pub presence: RedisPresenceManager,
     pub livekit: Arc<LiveKitRoomOrchestrator>,
     pub character_repo: Arc<dyn CharacterRepository>,
+    pub social: Arc<SocialManager>,
 }
 
 #[derive(Deserialize)]
@@ -83,9 +85,21 @@ async fn handle_socket(
         character.display_name.clone(),
         initial_pos,
         initial_chunk,
-        tx,
+        tx.clone(),
     );
     state.grid.insert_player(session);
+
+    // Register active player in SocialManager (sends initial friend & group list sync)
+    let user_id = character_id.to_string();
+    state
+        .social
+        .on_player_connected(
+            &user_id,
+            character_id,
+            &character.display_name,
+            tx,
+        )
+        .await;
 
     // Update Global Presence Phonebook
     let _ = state
@@ -171,10 +185,10 @@ async fn handle_socket(
                 // Social Plane: Chat, Calls, Signaling
                 Message::Text(json_str) => {
                     if let Ok(social_msg) = serde_json::from_str::<SocialMessage>(&json_str) {
-                        match social_msg {
+                        match &social_msg {
                             SocialMessage::PhoneRing { target_id, .. } => {
                                 if let Ok(Some(region_str)) =
-                                    state_clone.presence.lookup_presence(target_id as i64).await
+                                    state_clone.presence.lookup_presence(*target_id as i64).await
                                 {
                                     let target_region = region_str.trim_start_matches("region:");
                                     let _ = state_clone
@@ -198,7 +212,20 @@ async fn handle_socket(
                                     }
                                 }
                             }
-                            _ => {}
+                            _ => {
+                                let user_id = character_id.to_string();
+                                if let Err(err) = state_clone
+                                    .social
+                                    .handle_social_message(
+                                        &user_id,
+                                        &character.display_name,
+                                        social_msg,
+                                    )
+                                    .await
+                                {
+                                    tracing::warn!(%err, character_id, "Error handling social message");
+                                }
+                            }
                         }
                     }
                 }
@@ -218,6 +245,9 @@ async fn handle_socket(
     recv_task.abort();
 
     // Cleanup: Remove from Hot RAM state & Flush Cold State to PostgreSQL
+    let user_id = character_id.to_string();
+    state.social.on_player_disconnected(&user_id).await;
+
     if let Some(removed_session) = state.grid.remove_player(character_id) {
         let pos = removed_session.position;
         let chunk = removed_session.current_chunk;

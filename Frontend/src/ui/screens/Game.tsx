@@ -21,6 +21,8 @@ import { usePrefabStore } from '../../store/prefabStore.ts';
 import { BuildingEditorModal } from '../components/BuildingEditorModal.tsx';
 import { CloseIcon, DiceIcon, PlaceIcon } from '../components/building-editor/icons.tsx';
 import { TOKENS } from '../components/building-editor/theme.ts';
+import { SocialSidebar } from '../components/social/index.ts';
+import { useSocialStore } from '../../store/socialStore.ts';
 
 const kbdStyle: CSSProperties = {
   color: '#eef0f5',
@@ -68,6 +70,9 @@ export default function Game(): JSX.Element {
   const setActivePlacementAnchorZ = usePrefabStore((state) => state.setActivePlacementAnchorZ);
   const cancelWorldPlacement = usePrefabStore((state) => state.cancelWorldPlacement);
   const recordPlacedWorldPrefab = usePrefabStore((state) => state.recordPlacedWorldPrefab);
+
+  // Social Chat & Friends subscriptions
+  const toggleSocialSidebar = useSocialStore((state) => state.toggleSidebar);
 
   const placementAnchorZ = activePlacement?.anchorZ ?? 0;
 
@@ -161,6 +166,12 @@ export default function Game(): JSX.Element {
           target.tagName === 'TEXTAREA' ||
           target.tagName === 'SELECT');
 
+      if (!isEditorOpen && !inTextInput && (e.key === 'Enter' || e.key === 'Tab') && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        toggleSocialSidebar();
+        return;
+      }
+
       if (!isEditorOpen && !inTextInput && e.code === 'KeyB' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         openEditor();
@@ -214,6 +225,7 @@ export default function Game(): JSX.Element {
     setActivePlacementAnchorZ,
     toggleNoiseVisualizer,
     cycleZoomLevel,
+    toggleSocialSidebar,
   ]);
 
   const handleCanvasPointerMove = (e: ReactPointerEvent<HTMLDivElement>): void => {
@@ -961,6 +973,9 @@ export default function Game(): JSX.Element {
           onClose={closeEditor}
         />
       )}
+
+      {/* In-Game Social Chat & Persistent Friends System */}
+      <SocialSidebar />
     </div>
   );
 }

@@ -432,3 +432,213 @@ export const InputFlags = {
 } as const;
 
 export type InputFlag = (typeof InputFlags)[keyof typeof InputFlags];
+
+// ==========================================
+// Social System Protocol DTOs & Messages
+// ==========================================
+
+export interface FriendDto {
+  user_id: string;
+  username: string;
+  is_online: boolean;
+}
+
+export interface FriendRequestDto {
+  id: string;
+  from_user_id: string;
+  from_user_name: string;
+  to_user_id: string;
+  status: string;
+  created_at: string;
+}
+
+export interface GroupMemberDto {
+  user_id: string;
+  username: string;
+  is_owner?: boolean;
+  joined_at?: string;
+}
+
+export interface GroupDto {
+  id: string;
+  name: string;
+  owner_id: string;
+  members: GroupMemberDto[];
+  created_at?: string;
+}
+
+export interface ChatMessageDto {
+  id: string;
+  message_type?: string;
+  sender_id: string;
+  sender_name: string;
+  recipient_id?: string | null;
+  group_id?: string | null;
+  content: string;
+  created_at: string;
+}
+
+// Social Plane WebSocket Messages
+export interface VoiceJoinMessage {
+  type: 'VOICE_JOIN';
+  sfu_url: string;
+  token: string;
+}
+
+export interface VoiceSetTracksMessage {
+  type: 'VOICE_SET_TRACKS';
+  subscribe_to: string[];
+}
+
+export interface ChatMsgMessage {
+  type: 'CHAT_MSG';
+  channel: string;
+  sender: string;
+  content: string;
+}
+
+export interface PhoneRingMessage {
+  type: 'PHONE_RING';
+  caller_id: number;
+  target_id: number;
+}
+
+export interface PhoneAnswerMessage {
+  type: 'PHONE_ANSWER';
+  caller_id: number;
+  target_id: number;
+  accepted: boolean;
+}
+
+export interface PhoneHangupMessage {
+  type: 'PHONE_HANGUP';
+  session_id: string;
+}
+
+export interface ServerRestartMessage {
+  type: 'SERVER_RESTART';
+  message: string;
+}
+
+export interface FriendRequestSendMessage {
+  type: 'FRIEND_REQUEST_SEND';
+  target_user_id: string;
+}
+
+export interface FriendRequestReceivedMessage {
+  type: 'FRIEND_REQUEST_RECEIVED';
+  request: FriendRequestDto;
+}
+
+export interface FriendRequestAcceptMessage {
+  type: 'FRIEND_REQUEST_ACCEPT';
+  request_id: string;
+}
+
+export interface FriendRequestDeclineMessage {
+  type: 'FRIEND_REQUEST_DECLINE';
+  request_id: string;
+}
+
+export interface FriendListSyncMessage {
+  type: 'FRIEND_LIST_SYNC';
+  friends: FriendDto[];
+  pending_incoming: FriendRequestDto[];
+  pending_outgoing: FriendRequestDto[];
+}
+
+export interface FriendStatusUpdateMessage {
+  type: 'FRIEND_STATUS_UPDATE';
+  user_id: string;
+  is_online: boolean;
+}
+
+export interface DirectMsgSendMessage {
+  type: 'DIRECT_MSG_SEND';
+  recipient_id: string;
+  content: string;
+}
+
+export interface DirectMsgReceivedMessage {
+  type: 'DIRECT_MSG_RECEIVED';
+  message: ChatMessageDto;
+}
+
+export interface GroupCreateMessage {
+  type: 'GROUP_CREATE';
+  name: string;
+  initial_members: string[];
+}
+
+export interface GroupCreatedMessage {
+  type: 'GROUP_CREATED';
+  group: GroupDto;
+}
+
+export interface GroupInviteMessage {
+  type: 'GROUP_INVITE';
+  group_id: string;
+  target_user_id: string;
+}
+
+export interface GroupMemberJoinedMessage {
+  type: 'GROUP_MEMBER_JOINED';
+  group_id: string;
+  member: GroupMemberDto;
+}
+
+export interface GroupMsgSendMessage {
+  type: 'GROUP_MSG_SEND';
+  group_id: string;
+  content: string;
+}
+
+export interface GroupMsgReceivedMessage {
+  type: 'GROUP_MSG_RECEIVED';
+  message: ChatMessageDto;
+}
+
+export interface GroupListSyncMessage {
+  type: 'GROUP_LIST_SYNC';
+  groups: GroupDto[];
+}
+
+export interface FetchChatHistoryMessage {
+  type: 'FETCH_CHAT_HISTORY';
+  target_type: string;
+  target_id: string;
+  limit?: number;
+}
+
+export interface ChatHistorySyncMessage {
+  type: 'CHAT_HISTORY_SYNC';
+  target_type: string;
+  target_id: string;
+  messages: ChatMessageDto[];
+}
+
+export type SocialMessage =
+  | VoiceJoinMessage
+  | VoiceSetTracksMessage
+  | ChatMsgMessage
+  | PhoneRingMessage
+  | PhoneAnswerMessage
+  | PhoneHangupMessage
+  | ServerRestartMessage
+  | FriendRequestSendMessage
+  | FriendRequestReceivedMessage
+  | FriendRequestAcceptMessage
+  | FriendRequestDeclineMessage
+  | FriendListSyncMessage
+  | FriendStatusUpdateMessage
+  | DirectMsgSendMessage
+  | DirectMsgReceivedMessage
+  | GroupCreateMessage
+  | GroupCreatedMessage
+  | GroupInviteMessage
+  | GroupMemberJoinedMessage
+  | GroupMsgSendMessage
+  | GroupMsgReceivedMessage
+  | GroupListSyncMessage
+  | FetchChatHistoryMessage
+  | ChatHistorySyncMessage;

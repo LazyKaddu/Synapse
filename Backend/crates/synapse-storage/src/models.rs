@@ -53,3 +53,52 @@ pub struct PrefabRecord {
     pub created_at: Option<DateTime<Utc>>,
     pub updated_at: Option<DateTime<Utc>>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, PartialEq)]
+pub struct FriendshipRecord {
+    pub id: i64,
+    pub user_a_id: String,
+    pub user_b_id: String,
+    pub created_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, PartialEq)]
+pub struct FriendRequestRecord {
+    pub id: String,
+    pub from_user_id: String,
+    pub from_user_name: String,
+    pub to_user_id: String,
+    pub status: String,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, PartialEq)]
+pub struct ChatGroupRecord {
+    pub id: String,
+    pub name: String,
+    pub owner_id: String,
+    pub created_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, PartialEq)]
+pub struct ChatGroupMemberRecord {
+    pub group_id: String,
+    pub user_id: String,
+    pub user_name: String,
+    pub is_owner: bool,
+    pub joined_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, PartialEq)]
+pub struct ChatMessageRecord {
+    pub id: String,
+    pub message_type: String,
+    pub sender_id: String,
+    pub sender_name: String,
+    pub recipient_id: Option<String>,
+    pub group_id: Option<String>,
+    pub content: String,
+    pub created_at: Option<DateTime<Utc>>,
+}
+

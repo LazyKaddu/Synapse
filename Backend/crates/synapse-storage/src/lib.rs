@@ -3,10 +3,14 @@ pub mod redis;
 pub mod repositories;
 pub mod router;
 
-pub use models::{Account, Character, InventoryItem, PrefabRecord};
+pub use models::{
+    Account, Character, ChatGroupMemberRecord, ChatGroupRecord, ChatMessageRecord,
+    FriendRequestRecord, FriendshipRecord, InventoryItem, PrefabRecord,
+};
 pub use redis::{RedisPresenceManager, RedisStateCache, WarmPlayerState};
 pub use repositories::{
-    AccountRepository, CharacterRepository, InventoryRepository, PgAccountRepository,
-    PgCharacterRepository, PgInventoryRepository, PgPrefabRepository, PrefabRepository,
+    AccountRepository, CharacterRepository, ChatRepository, InMemoryChatRepository,
+    InventoryRepository, PgAccountRepository, PgCharacterRepository, PgChatRepository,
+    PgInventoryRepository, PgPrefabRepository, PrefabRepository,
 };
 pub use router::{DbRouter, PgLsn, QueryIntent, ReadConsistency, WriteTracker, WriteWatermark};
