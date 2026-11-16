@@ -13,42 +13,15 @@ export const BinaryOpCode = {
 
 export type BinaryOpCode = (typeof BinaryOpCode)[keyof typeof BinaryOpCode];
 
-// Social Plane JSON messages over WebSocket
-export type SocialMessage =
-  | {
-      type: 'VOICE_JOIN';
-      sfu_url: string;
-      token: string;
-    }
-  | {
-      type: 'VOICE_SET_TRACKS';
-      subscribe_to: string[];
-    }
-  | {
-      type: 'CHAT_MSG';
-      channel: string;
-      sender: string;
-      content: string;
-    }
-  | {
-      type: 'PHONE_RING';
-      caller_id: number;
-      target_id: number;
-    }
-  | {
-      type: 'PHONE_ANSWER';
-      caller_id: number;
-      target_id: number;
-      accepted: boolean;
-    }
-  | {
-      type: 'PHONE_HANGUP';
-      session_id: string;
-    }
-  | {
-      type: 'SERVER_RESTART';
-      message: string;
-    };
+// Social Plane JSON messages and DTOs over WebSocket
+export type {
+  FriendDto,
+  FriendRequestDto,
+  GroupMemberDto,
+  GroupDto,
+  ChatMessageDto,
+  SocialMessage,
+} from '../types/protocol';
 
 // Decoded downstream binary packet representations
 export type ServerBinaryPacket =
