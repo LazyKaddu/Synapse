@@ -26,3 +26,5 @@ sqlx.workspace = true
 redis.workspace = true
 anyhow.workspace = true
 dotenvy.workspace = true
+uuid.workspace = true
+chrono.workspace = true

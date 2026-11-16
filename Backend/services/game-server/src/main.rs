@@ -4,13 +4,15 @@ use axum::{
 };
 use game_server::engine::{run_phone_subscriber, run_tick_loop, OutgoingMessage, SpatialGrid};
 use game_server::handler::{ws_handler, ServerState};
+use game_server::social::SocialManager;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use synapse_common::{init_telemetry, AppConfig};
 use synapse_livekit::LiveKitRoomOrchestrator;
 use synapse_protocol::SocialMessage;
 use synapse_storage::{
-    CharacterRepository, DbRouter, PgCharacterRepository, RedisPresenceManager, RedisStateCache,
+    CharacterRepository, ChatRepository, DbRouter, PgCharacterRepository, PgChatRepository,
+    RedisPresenceManager, RedisStateCache,
 };
 use tower_http::cors::CorsLayer;
 
@@ -42,6 +44,8 @@ async fn main() -> anyhow::Result<()> {
     let _router_cleanup = router.spawn_cleanup_task(std::time::Duration::from_secs(30));
     let character_repo: Arc<dyn CharacterRepository> =
         Arc::new(PgCharacterRepository::new(router.clone()));
+    let chat_repo: Arc<dyn ChatRepository> = Arc::new(PgChatRepository::new(router.clone()));
+    let social = Arc::new(SocialManager::new(chat_repo.clone()));
 
     // 3. Redis Connections (State cache & Global presence)
     let primary_redis = redis::Client::open(config.redis.primary_url.as_str())?;
@@ -69,6 +73,7 @@ async fn main() -> anyhow::Result<()> {
         presence: presence.clone(),
         livekit: livekit.clone(),
         character_repo: character_repo.clone(),
+        social: social.clone(),
     };
 
     // 6. Spawn Background Tasks
