@@ -3,6 +3,7 @@ import {
   type JSX,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -18,11 +19,18 @@ import {
 import { base64ToArrayBuffer } from '../../engine/prefab/builderGrid.ts';
 import { useGameStore } from '../../store/gameStore.ts';
 import { usePrefabStore } from '../../store/prefabStore.ts';
+import { useTeleportStore } from '../../store/teleportStore.ts';
+import { gameSocket } from '../../network/socket.ts';
 import { BuildingEditorModal } from '../components/BuildingEditorModal.tsx';
 import { CloseIcon, DiceIcon, PlaceIcon } from '../components/building-editor/icons.tsx';
 import { TOKENS } from '../components/building-editor/theme.ts';
 import { SocialSidebar } from '../components/social/index.ts';
 import { useSocialStore } from '../../store/socialStore.ts';
+import {
+  TeleportFeedback,
+  TeleportIcon,
+  TeleporterModal,
+} from '../components/teleporter/index.ts';
 
 const kbdStyle: CSSProperties = {
   color: '#eef0f5',
@@ -74,6 +82,29 @@ export default function Game(): JSX.Element {
   // Social Chat & Friends subscriptions
   const toggleSocialSidebar = useSocialStore((state) => state.toggleSidebar);
 
+  // Teleport Store subscriptions
+  const isTeleportOpen = useTeleportStore((state) => state.isOpen);
+  const toggleTeleportModal = useTeleportStore((state) => state.toggleModal);
+  const closeTeleportModal = useTeleportStore((state) => state.closeModal);
+  const triggerFlash = useTeleportStore((state) => state.triggerFlash);
+  const showToast = useTeleportStore((state) => state.showToast);
+
+  const handleTeleport = useCallback(
+    (worldX: number, worldY: number, label?: string) => {
+      if (!worldRef.current) return;
+      const res = worldRef.current.teleportTo(worldX, worldY, { safeCheck: true });
+      triggerFlash(350);
+      const targetName = label ? label : `(${Math.round(res.x)}, ${Math.round(res.y)})`;
+      const toastMsg = res.safeAdjusted
+        ? `Teleported to ${targetName} (adjusted to safe ground)`
+        : `Teleported to ${targetName}!`;
+      showToast(toastMsg, 'success');
+      gameSocket.sendMovement(res.x, res.y);
+      closeTeleportModal();
+    },
+    [triggerFlash, showToast, closeTeleportModal]
+  );
+
   const placementAnchorZ = activePlacement?.anchorZ ?? 0;
 
   const decodedActivePlacement = useMemo(() => {
@@ -109,7 +140,9 @@ export default function Game(): JSX.Element {
     });
     const world = gameLoop.getWorld();
     worldRef.current = world;
-    world.setEditorOpen(usePrefabStore.getState().isEditorOpen);
+    world.setEditorOpen(
+      usePrefabStore.getState().isEditorOpen || useTeleportStore.getState().isOpen
+    );
 
     gameLoop
       .start()
@@ -141,13 +174,14 @@ export default function Game(): JSX.Element {
     };
   }, []);
 
-  // Keep World movement pause synchronized with editor modal state
+  // Keep World movement pause synchronized with editor and teleporter modal states
   useEffect(() => {
-    worldRef.current?.setEditorOpen(isEditorOpen);
-    if (isEditorOpen) {
+    const isPaused = isEditorOpen || isTeleportOpen;
+    worldRef.current?.setEditorOpen(isPaused);
+    if (isPaused) {
       worldRef.current?.updatePlacementPreview(null, 0, 0);
     }
-  }, [isEditorOpen]);
+  }, [isEditorOpen, isTeleportOpen]);
 
   // Clear preview whenever activePlacement clears
   useEffect(() => {
@@ -156,7 +190,7 @@ export default function Game(): JSX.Element {
     }
   }, [activePlacement]);
 
-  // Global [B] shortcut to open Building Editor and [Esc] to cancel active world placement
+  // Global [B] shortcut to open Building Editor, [T] for Teleporter, and [Esc] to cancel active world placement
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent): void => {
       const target = e.target as HTMLElement | null;
@@ -166,49 +200,61 @@ export default function Game(): JSX.Element {
           target.tagName === 'TEXTAREA' ||
           target.tagName === 'SELECT');
 
-      if (!isEditorOpen && !inTextInput && (e.key === 'Enter' || e.key === 'Tab') && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (!isEditorOpen && !isTeleportOpen && !inTextInput && (e.key === 'Enter' || e.key === 'Tab') && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         toggleSocialSidebar();
         return;
       }
 
-      if (!isEditorOpen && !inTextInput && e.code === 'KeyB' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (!isEditorOpen && !isTeleportOpen && !inTextInput && e.code === 'KeyT' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        toggleTeleportModal();
+        return;
+      }
+
+      if (isTeleportOpen && e.key === 'Escape') {
+        e.preventDefault();
+        closeTeleportModal();
+        return;
+      }
+
+      if (!isEditorOpen && !isTeleportOpen && !inTextInput && e.code === 'KeyB' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         openEditor();
         return;
       }
 
-      if (!isEditorOpen && !inTextInput && e.code === 'KeyV' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (!isEditorOpen && !isTeleportOpen && !inTextInput && e.code === 'KeyV' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         toggleNoiseVisualizer();
         return;
       }
 
-      if (!isEditorOpen && !inTextInput && e.code === 'KeyZ' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (!isEditorOpen && !isTeleportOpen && !inTextInput && e.code === 'KeyZ' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         cycleZoomLevel();
         return;
       }
 
-      if (!isEditorOpen && !inTextInput && e.code === 'KeyL' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (!isEditorOpen && !isTeleportOpen && !inTextInput && e.code === 'KeyL' && !e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         setShowLegend((prev) => !prev);
         return;
       }
 
-      if (!isEditorOpen && activePlacement && e.key === 'Escape') {
+      if (!isEditorOpen && !isTeleportOpen && activePlacement && e.key === 'Escape') {
         e.preventDefault();
         cancelWorldPlacement();
         return;
       }
 
-      if (!isEditorOpen && !inTextInput && activePlacement && e.key === '[') {
+      if (!isEditorOpen && !isTeleportOpen && !inTextInput && activePlacement && e.key === '[') {
         e.preventDefault();
         setActivePlacementAnchorZ(placementAnchorZ - 1);
         return;
       }
 
-      if (!isEditorOpen && !inTextInput && activePlacement && e.key === ']') {
+      if (!isEditorOpen && !isTeleportOpen && !inTextInput && activePlacement && e.key === ']') {
         e.preventDefault();
         setActivePlacementAnchorZ(placementAnchorZ + 1);
       }
@@ -218,6 +264,7 @@ export default function Game(): JSX.Element {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
     isEditorOpen,
+    isTeleportOpen,
     activePlacement,
     placementAnchorZ,
     openEditor,
@@ -226,10 +273,12 @@ export default function Game(): JSX.Element {
     toggleNoiseVisualizer,
     cycleZoomLevel,
     toggleSocialSidebar,
+    toggleTeleportModal,
+    closeTeleportModal,
   ]);
 
   const handleCanvasPointerMove = (e: ReactPointerEvent<HTMLDivElement>): void => {
-    if (isEditorOpen || !decodedActivePlacement || !worldRef.current || !canvasContainerRef.current) {
+    if (isEditorOpen || isTeleportOpen || !decodedActivePlacement || !worldRef.current || !canvasContainerRef.current) {
       return;
     }
     const rect = canvasContainerRef.current.getBoundingClientRect();
@@ -254,6 +303,7 @@ export default function Game(): JSX.Element {
     if (
       e.button !== 0 ||
       isEditorOpen ||
+      isTeleportOpen ||
       !activePlacement ||
       !decodedActivePlacement ||
       !worldRef.current ||
@@ -284,7 +334,7 @@ export default function Game(): JSX.Element {
   };
 
   const handleCanvasContextMenu = (e: ReactMouseEvent<HTMLDivElement>): void => {
-    if (!isEditorOpen && activePlacement) {
+    if (!isEditorOpen && !isTeleportOpen && activePlacement) {
       e.preventDefault();
       cancelWorldPlacement();
     }
@@ -833,24 +883,48 @@ export default function Game(): JSX.Element {
           </button>
         </div>
 
-        <button
-          type="button"
-          onClick={openEditor}
-          style={{
-            marginTop: 6,
-            width: '100%',
-            background: '#38bdf8',
-            color: '#09111b',
-            border: 'none',
-            borderRadius: 6,
-            padding: '7px 10px',
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: 'pointer',
-          }}
-        >
-          Building Editor [B]
-        </button>
+        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+          <button
+            type="button"
+            onClick={openEditor}
+            style={{
+              flex: 1,
+              background: '#38bdf8',
+              color: '#09111b',
+              border: 'none',
+              borderRadius: 6,
+              padding: '7px 10px',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Building Editor [B]
+          </button>
+          <button
+            type="button"
+            onClick={toggleTeleportModal}
+            title="Open Teleporter Waypoints (T)"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              background: 'rgba(56, 189, 248, 0.16)',
+              color: '#38bdf8',
+              border: '1px solid rgba(56, 189, 248, 0.4)',
+              borderRadius: 6,
+              padding: '7px 12px',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'background-color 140ms ease',
+            }}
+          >
+            <TeleportIcon size={14} />
+            <span>Teleport [T]</span>
+          </button>
+        </div>
       </div>
 
       {/* Bottom Right Controls Guide */}
@@ -878,7 +952,8 @@ export default function Game(): JSX.Element {
         </div>
         <div>
           <kbd style={kbdStyle}>V</kbd> Noise Colors · <kbd style={kbdStyle}>Z</kbd> Zoom ·{' '}
-          <kbd style={kbdStyle}>C</kbd> Debug Overlay · <kbd style={kbdStyle}>B</kbd> Building Editor
+          <kbd style={kbdStyle}>C</kbd> Debug Overlay · <kbd style={kbdStyle}>B</kbd> Building Editor ·{' '}
+          <kbd style={kbdStyle}>T</kbd> Teleport
         </div>
       </div>
 
@@ -973,6 +1048,10 @@ export default function Game(): JSX.Element {
           onClose={closeEditor}
         />
       )}
+
+      {/* Teleporter Modal Dialog & Screen Flash / Toast Feedback */}
+      <TeleporterModal onTeleport={handleTeleport} />
+      <TeleportFeedback />
 
       {/* In-Game Social Chat & Persistent Friends System */}
       <SocialSidebar />
