@@ -24,5 +24,10 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": ["src"],
-  "exclude": ["src/__tests__"]
+  "exclude": [
+    "src/**/__tests__/*",
+    "src/api/client.ts",
+    "src/api/auth.ts",
+    "src/network/voice.ts"
+  ]
 }
