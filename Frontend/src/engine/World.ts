@@ -166,9 +166,11 @@ export class World {
     this.boundKeyDown = this.handleKeyDown.bind(this);
     this.boundKeyUp = this.handleKeyUp.bind(this);
     this.boundBlur = () => this.keysDown.clear();
-    window.addEventListener('keydown', this.boundKeyDown);
-    window.addEventListener('keyup', this.boundKeyUp);
-    window.addEventListener('blur', this.boundBlur);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('keydown', this.boundKeyDown);
+      window.addEventListener('keyup', this.boundKeyUp);
+      window.addEventListener('blur', this.boundBlur);
+    }
 
     // Subscribe to store debug overlay, inset inspector, buffer margin, and seed updates
     this.storeUnsubscribe = useGameStore.subscribe((state) => {
@@ -256,6 +258,13 @@ export class World {
     if (open) {
       this.keysDown.clear();
     }
+  }
+
+  /**
+   * Retrieves the current WorldNoise procedural sampler.
+   */
+  public getWorldNoise(): WorldNoise {
+    return this.worldNoise;
   }
 
   public getAssetLibrary(): AssetLibraryLoader {
@@ -454,6 +463,51 @@ export class World {
   }
 
   /**
+   * Teleports player directly to target world coordinate (worldX, worldY).
+   * Resolves safe spawn via CollisionEngine when safeCheck is true (default true)
+   * to avoid spawning inside water basins, tree trunks, or village house walls.
+   * Updates playerX/playerY, character graphics, camera, culling, and syncs to useGameStore.
+   */
+  public teleportTo(
+    worldX: number,
+    worldY: number,
+    options?: { safeCheck?: boolean }
+  ): { x: number; y: number; safeAdjusted: boolean } {
+    const safeCheck = options?.safeCheck ?? true;
+    let targetX = worldX;
+    let targetY = worldY;
+    let safeAdjusted = false;
+
+    if (safeCheck && this.collisionEngine) {
+      const safe = this.collisionEngine.findSafeSpawn(
+        worldX,
+        worldY,
+        this.playerHalfSize,
+        this.playerHalfSize
+      );
+      if (safe.x !== worldX || safe.y !== worldY) {
+        safeAdjusted = true;
+      }
+      targetX = safe.x;
+      targetY = safe.y;
+    }
+
+    this.playerX = targetX;
+    this.playerY = targetY;
+    if (this.characterBox) {
+      this.characterBox.position.set(this.playerX, this.playerY);
+    }
+
+    // Sync to zustand game store
+    useGameStore.getState().setPlayerCoordinates(this.playerX, this.playerY, RENDER_TILE_SIZE);
+
+    // Refresh camera, sprite pool, and culling bounds
+    this.updateCameraAndCulling();
+
+    return { x: targetX, y: targetY, safeAdjusted };
+  }
+
+  /**
    * Updates camera position with integer pixel rounding to eliminate tile shimmering,
    * evaluates loose culling bounds, and recycles sprites through the pool.
    */
@@ -629,9 +683,11 @@ export class World {
   public destroy(): void {
     if (this.isDestroyed) return;
     this.isDestroyed = true;
-    window.removeEventListener('keydown', this.boundKeyDown);
-    window.removeEventListener('keyup', this.boundKeyUp);
-    window.removeEventListener('blur', this.boundBlur);
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('keydown', this.boundKeyDown);
+      window.removeEventListener('keyup', this.boundKeyUp);
+      window.removeEventListener('blur', this.boundBlur);
+    }
     if (this.storeUnsubscribe) {
       this.storeUnsubscribe();
       this.storeUnsubscribe = null;
