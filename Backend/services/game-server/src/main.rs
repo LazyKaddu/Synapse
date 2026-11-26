@@ -10,6 +10,7 @@ use std::sync::Arc;
 use synapse_common::{init_telemetry, AppConfig};
 use synapse_livekit::LiveKitRoomOrchestrator;
 use synapse_protocol::SocialMessage;
+use synapse_spatial::{CollisionEngine, WorldNoise};
 use synapse_storage::{
     CharacterRepository, ChatRepository, DbRouter, PgCharacterRepository, PgChatRepository,
     RedisPresenceManager, RedisStateCache,
@@ -63,12 +64,16 @@ async fn main() -> anyhow::Result<()> {
         config.livekit.api_secret.clone(),
     ));
 
-    // 5. Initialize Spatial Engine Grid & State
+    // 5. Initialize Spatial Engine Grid, CollisionEngine & State
     let grid = Arc::new(SpatialGrid::new());
+    let collision = Arc::new(CollisionEngine::new(WorldNoise::new(
+        config.game_server.world_seed as i32,
+    )));
 
     let state = ServerState {
         config: config.clone(),
         grid: grid.clone(),
+        collision,
         cache: cache.clone(),
         presence: presence.clone(),
         livekit: livekit.clone(),
@@ -77,7 +82,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // 6. Spawn Background Tasks
-    // 10Hz Spatial Tick Loop
+    // 60Hz Spatial Simulation & 10Hz Broadcast Tick Loop
     let config_clone = config.clone();
     let grid_clone = grid.clone();
     let cache_clone = cache.clone();
