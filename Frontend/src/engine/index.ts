@@ -13,3 +13,5 @@ export * from './culling/spritePool.ts';
 export * from './prefab/PrefabCodec.ts';
 export * from './prefab/assetRegistry.ts';
 export * from './prefab/builderGrid.ts';
+export * from './net/PredictionController.ts';
+export * from './net/RemotePlayerInterpolator.ts';

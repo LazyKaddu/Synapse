@@ -18,6 +18,10 @@ import { WorldNoise, getNoiseVisualTile } from './procedural/worldNoise.ts';
 import { calculateTileBounds, type TileBounds } from './culling/looseCulling.ts';
 import { SpritePool, type CullingTelemetry } from './culling/spritePool.ts';
 import { CollisionEngine, type WorldCollider, type AABB } from './collision/index.ts';
+import { PredictionController } from './net/PredictionController.ts';
+import { RemotePlayerInterpolator } from './net/RemotePlayerInterpolator.ts';
+import type { ServerBinaryPacket } from '../network/opcodes.ts';
+import { gameSocket } from '../network/socket.ts';
 import { useGameStore } from '../store/gameStore.ts';
 
 export interface WorldConfig {
@@ -53,6 +57,11 @@ export class World {
   public readonly playerHalfSize = 14; // 28x28 hitbox centered in 32x32 character sprite
   public isColliding = false;
   public lastCollider?: WorldCollider;
+
+  // Client-Side Prediction & Remote Player Interpolation
+  public readonly predictionController: PredictionController;
+  public readonly remoteInterpolator: RemotePlayerInterpolator;
+  private readonly remotePlayerSprites = new Map<number, Graphics>();
 
   // Configuration and dimensions
   private seed: number;
@@ -192,6 +201,7 @@ export class World {
       if (seedChanged) {
         this.worldNoise = new WorldNoise(this.seed);
         this.collisionEngine = new CollisionEngine(this.worldNoise);
+        this.predictionController.setCollisionEngine(this.collisionEngine);
         const safe = this.collisionEngine.findSafeSpawn(
           this.playerX,
           this.playerY,
@@ -200,6 +210,7 @@ export class World {
         );
         this.playerX = safe.x;
         this.playerY = safe.y;
+        this.predictionController.resetPosition(safe.x, safe.y);
         this.characterBox.position.set(this.playerX, this.playerY);
       }
       if (seedChanged || noiseColorsChanged || zoomChanged) {
@@ -223,6 +234,15 @@ export class World {
     this.zoomLevel = currentStore.zoomLevel;
     this.worldNoise = new WorldNoise(this.seed);
     this.collisionEngine = new CollisionEngine(this.worldNoise);
+    this.predictionController = new PredictionController({
+      collisionEngine: this.collisionEngine,
+      initialX: this.playerX,
+      initialY: this.playerY,
+      playerHalfSize: this.playerHalfSize,
+      baseSpeed: this.baseSpeed,
+      sprintSpeed: this.sprintSpeed,
+    });
+    this.remoteInterpolator = new RemotePlayerInterpolator();
   }
 
   /**
@@ -245,6 +265,7 @@ export class World {
     );
     this.playerX = safe.x;
     this.playerY = safe.y;
+    this.predictionController.resetPosition(safe.x, safe.y);
     this.characterBox.position.set(this.playerX, this.playerY);
 
     this.updateCameraAndCulling();
@@ -408,6 +429,7 @@ export class World {
     if (this.isDestroyed) return;
 
     this.processMovement(deltaSeconds);
+    this.updateRemotePlayers();
     this.updateCameraAndCulling();
   }
 
@@ -416,50 +438,118 @@ export class World {
       return;
     }
 
-    let dx = 0;
-    let dy = 0;
+    let rawDx = 0;
+    let rawDy = 0;
 
-    if (this.keysDown.has('KeyW') || this.keysDown.has('ArrowUp')) dy -= 1;
-    if (this.keysDown.has('KeyS') || this.keysDown.has('ArrowDown')) dy += 1;
-    if (this.keysDown.has('KeyA') || this.keysDown.has('ArrowLeft')) dx -= 1;
-    if (this.keysDown.has('KeyD') || this.keysDown.has('ArrowRight')) dx += 1;
+    if (this.keysDown.has('KeyW') || this.keysDown.has('ArrowUp')) rawDy -= 1;
+    if (this.keysDown.has('KeyS') || this.keysDown.has('ArrowDown')) rawDy += 1;
+    if (this.keysDown.has('KeyA') || this.keysDown.has('ArrowLeft')) rawDx -= 1;
+    if (this.keysDown.has('KeyD') || this.keysDown.has('ArrowRight')) rawDx += 1;
 
-    if (dx !== 0 || dy !== 0) {
-      // Normalize diagonal vectors
-      if (dx !== 0 && dy !== 0) {
-        dx *= Math.SQRT1_2;
-        dy *= Math.SQRT1_2;
-      }
+    const isSprinting = this.keysDown.has('ShiftLeft') || this.keysDown.has('ShiftRight');
+    const step = this.predictionController.stepInput(rawDx, rawDy, isSprinting, dt);
 
-      const isSprinting = this.keysDown.has('ShiftLeft') || this.keysDown.has('ShiftRight');
-      const speed = isSprinting ? this.sprintSpeed : this.baseSpeed;
+    this.playerX = step.renderX;
+    this.playerY = step.renderY;
 
-      const resolution = this.collisionEngine.resolveMovement(
-        this.playerX,
-        this.playerY,
-        dx,
-        dy,
-        speed,
-        dt,
-        this.playerHalfSize,
-        this.playerHalfSize
-      );
-
-      this.playerX = resolution.newX;
-      this.playerY = resolution.newY;
-      this.isColliding = resolution.xBlocked || resolution.yBlocked;
-      this.lastCollider = resolution.collider;
-      this.facingAngle = Math.atan2(dy, dx);
+    if (rawDx !== 0 || rawDy !== 0) {
+      this.isColliding = step.xBlocked || step.yBlocked;
+      this.lastCollider = step.collider;
+      this.facingAngle = Math.atan2(rawDy, rawDx);
 
       // Sync player coordinates with store
       useGameStore.getState().setPlayerCoordinates(this.playerX, this.playerY, RENDER_TILE_SIZE);
+
+      if (gameSocket.isConnected) {
+        const dtMs = Math.max(1, Math.min(0xffff, Math.round(dt * 1000)));
+        gameSocket.sendInput(step.seq, rawDx, rawDy, isSprinting, dtMs);
+      }
     } else {
       this.isColliding = false;
+      if (this.predictionController.visualErrorX !== 0 || this.predictionController.visualErrorY !== 0) {
+        useGameStore.getState().setPlayerCoordinates(this.playerX, this.playerY, RENDER_TILE_SIZE);
+      }
     }
 
     // Update character placeholder box position and facing rotation in world space
     this.characterBox.position.set(this.playerX, this.playerY);
     this.characterBox.rotation = this.facingAngle + Math.PI / 2;
+  }
+
+  /**
+   * Handles incoming binary packets from the game server (reconciliation acks & remote player snapshots).
+   */
+  public handleServerPacket(packet: ServerBinaryPacket): void {
+    if (this.isDestroyed) return;
+
+    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+
+    switch (packet.kind) {
+      case 'player_state_ack': {
+        const res = this.predictionController.reconcile({
+          lastProcessedSeq: packet.lastProcessedSeq,
+          posX: packet.posX,
+          posY: packet.posY,
+        });
+        if (res.mode === 'snap') {
+          this.playerX = this.predictionController.renderX;
+          this.playerY = this.predictionController.renderY;
+          if (this.characterBox) {
+            this.characterBox.position.set(this.playerX, this.playerY);
+          }
+          useGameStore.getState().setPlayerCoordinates(this.playerX, this.playerY, RENDER_TILE_SIZE);
+        }
+        break;
+      }
+
+      case 'neighbor_movement': {
+        this.remoteInterpolator.pushSnapshot(packet.playerId, {
+          serverTick: packet.serverTick,
+          timestampMs: nowMs,
+          posX: packet.posX,
+          posY: packet.posY,
+          velX: packet.velX,
+          velY: packet.velY,
+        });
+        break;
+      }
+
+      case 'entity_despawn': {
+        this.remoteInterpolator.removePlayer(packet.entityId);
+        const sprite = this.remotePlayerSprites.get(packet.entityId);
+        if (sprite) {
+          this.characterContainer.removeChild(sprite);
+          sprite.destroy();
+          this.remotePlayerSprites.delete(packet.entityId);
+        }
+        break;
+      }
+    }
+  }
+
+  private updateRemotePlayers(): void {
+    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    for (const playerId of this.remoteInterpolator.getPlayerIds()) {
+      const sample = this.remoteInterpolator.sample(playerId, nowMs);
+      if (!sample) continue;
+
+      let sprite = this.remotePlayerSprites.get(playerId);
+      if (!sprite) {
+        sprite = new Graphics();
+        sprite.rect(-16, -16, 32, 32);
+        sprite.fill({ color: 0xf59e0b, alpha: 0.9 });
+        sprite.stroke({ color: 0xffffff, width: 2 });
+        sprite.rect(-6, -12, 12, 6);
+        sprite.fill({ color: 0x0f172a, alpha: 0.8 });
+        this.characterContainer.addChild(sprite);
+        this.remotePlayerSprites.set(playerId, sprite);
+      }
+
+      sprite.position.set(sample.posX, sample.posY);
+      if (sample.velX !== 0 || sample.velY !== 0) {
+        sprite.rotation = Math.atan2(sample.velY, sample.velX) + Math.PI / 2;
+      }
+    }
   }
 
   /**
@@ -494,6 +584,7 @@ export class World {
 
     this.playerX = targetX;
     this.playerY = targetY;
+    this.predictionController.resetPosition(targetX, targetY);
     if (this.characterBox) {
       this.characterBox.position.set(this.playerX, this.playerY);
     }
@@ -693,6 +784,8 @@ export class World {
       this.storeUnsubscribe = null;
     }
     this.clearPlacementPreview();
+    this.remotePlayerSprites.clear();
+    this.remoteInterpolator.clear();
     this.spritePool.clear();
     this.tilesetManager.destroy();
     this.assetLibrary.destroy();

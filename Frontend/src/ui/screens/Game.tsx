@@ -99,7 +99,7 @@ export default function Game(): JSX.Element {
         ? `Teleported to ${targetName} (adjusted to safe ground)`
         : `Teleported to ${targetName}!`;
       showToast(toastMsg, 'success');
-      gameSocket.sendMovement(res.x, res.y);
+      gameSocket.sendTeleport(res.x, res.y);
       closeTeleportModal();
     },
     [triggerFlash, showToast, closeTeleportModal]
@@ -144,6 +144,10 @@ export default function Game(): JSX.Element {
       usePrefabStore.getState().isEditorOpen || useTeleportStore.getState().isOpen
     );
 
+    const unsubscribeBinary = gameSocket.onBinary((packet) => {
+      world.handleServerPacket(packet);
+    });
+
     gameLoop
       .start()
       .then(() => {
@@ -168,6 +172,7 @@ export default function Game(): JSX.Element {
 
     return () => {
       disposed = true;
+      unsubscribeBinary();
       worldRef.current = null;
       gameLoop.destroy();
       canvas.remove();
