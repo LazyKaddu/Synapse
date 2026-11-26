@@ -1,0 +1,147 @@
+name: Synapse CI / CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'Backend/**'
+      - '.github/workflows/ci.yaml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'Backend/**'
+      - '.github/workflows/ci.yaml'
+  workflow_dispatch:
+    inputs:
+      push_images:
+        description: 'Publish built Docker images to Docker Hub'
+        required: true
+        type: boolean
+        default: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ============================================================================
+  # Stage 1: Build & Containerize Synapse Backend Microservices
+  # ============================================================================
+  build-and-push:
+    name: Build & Push (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: gateway
+            image_name: synapse-gateway
+            dockerfile: Backend/docker/Dockerfile.gateway
+            context: Backend
+          - service: game-server
+            image_name: synapse-game-server
+            dockerfile: Backend/docker/Dockerfile.game-server
+            context: Backend
+          - service: worker
+            image_name: synapse-worker
+            dockerfile: Backend/docker/Dockerfile.worker
+            context: Backend
+          - service: pgbouncer
+            image_name: synapse-pgbouncer
+            dockerfile: Backend/docker/Dockerfile.pgbouncer
+            context: Backend/docker
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Compute Build Metadata & Push Policy
+        id: meta-info
+        run: |
+          SHA_SHORT=$(git rev-parse --short HEAD)
+          echo "sha_short=${SHA_SHORT}" >> "$GITHUB_OUTPUT"
+
+          # Determine whether built images should be pushed to Docker Hub:
+          # - Pull Requests: false (build & validation only)
+          # - Workflow Dispatch: follows input flag (default true)
+          # - Push to main: true
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "should_push=false" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "should_push=${{ inputs.push_images }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_push=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: steps.meta-info.outputs.should_push == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract Docker Image Tags & Labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image_name }}
+          tags: |
+            type=raw,value=sha-${{ steps.meta-info.outputs.sha_short }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=ref,event=branch
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: ${{ steps.meta-info.outputs.should_push == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  # ============================================================================
+  # Stage 2: Helm Chart & Kubernetes Deployment (Reserved Placeholder)
+  # ============================================================================
+  # This stage executes automatically after all Docker images have been built
+  # and pushed to Docker Hub. Keep this placeholder stage ready for your Helm
+  # deployment logic (e.g. updating values.yaml in a GitOps/ArgoCD repository).
+  # ============================================================================
+  update-helm-chart:
+    name: Update Helm Chart
+    needs: [build-and-push]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Helm Chart Update Placeholder
+        run: |
+          SHA_SHORT=$(git rev-parse --short HEAD)
+          echo "=========================================================================="
+          echo "SYNAPSE HELM DEPLOYMENT STAGE (PLACEHOLDER)"
+          echo "=========================================================================="
+          echo "All backend images were successfully built and pushed to Docker Hub:"
+          echo "  - ${{ secrets.DOCKERHUB_USERNAME }}/synapse-gateway:sha-${SHA_SHORT}"
+          echo "  - ${{ secrets.DOCKERHUB_USERNAME }}/synapse-game-server:sha-${SHA_SHORT}"
+          echo "  - ${{ secrets.DOCKERHUB_USERNAME }}/synapse-worker:sha-${SHA_SHORT}"
+          echo "  - ${{ secrets.DOCKERHUB_USERNAME }}/synapse-pgbouncer:sha-${SHA_SHORT}"
+          echo ""
+          echo "Downstream Helm instructions to implement when your Helm repository is ready:"
+          echo "  1. Clone/checkout your Helm chart repository or locate local charts."
+          echo "  2. Use 'yq' or sed to update image.tag in values.yaml with 'sha-${SHA_SHORT}'."
+          echo "  3. Commit and push changes to trigger GitOps sync (ArgoCD / Flux CD),"
+          echo "     or run 'helm upgrade --install synapse ./helm/synapse --namespace synapse'."
+          echo "=========================================================================="
+
