@@ -8,7 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "node --experimental-strip-types --test src/engine/__tests__/*.test.ts src/__tests__/socialStore.test.ts",
+    "test": "node --experimental-strip-types --test src/engine/__tests__/*.test.ts src/__tests__/socialStore.test.ts src/__tests__/binary.test.ts",
     "test:integration": "node --experimental-strip-types scripts/integration-test-suite.ts"
   },
   "dependencies": {

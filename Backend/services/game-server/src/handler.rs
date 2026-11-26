@@ -1,4 +1,4 @@
-use crate::engine::{OutgoingMessage, PlayerSession, SpatialGrid};
+use crate::engine::{OutgoingMessage, PlayerSession, QueuedInput, SpatialGrid};
 use crate::social::SocialManager;
 use axum::{
     extract::{
@@ -14,7 +14,7 @@ use std::sync::Arc;
 use synapse_common::{verify_boarding_pass, AppConfig};
 use synapse_livekit::LiveKitRoomOrchestrator;
 use synapse_protocol::{ClientBinaryPacket, SocialMessage};
-use synapse_spatial::WorldPos;
+use synapse_spatial::{CollisionEngine, GridDelta, WorldPos};
 use synapse_storage::{CharacterRepository, RedisPresenceManager, RedisStateCache};
 use tokio::sync::mpsc;
 
@@ -22,11 +22,37 @@ use tokio::sync::mpsc;
 pub struct ServerState {
     pub config: Arc<AppConfig>,
     pub grid: Arc<SpatialGrid>,
+    pub collision: Arc<CollisionEngine>,
     pub cache: RedisStateCache,
     pub presence: RedisPresenceManager,
     pub livekit: Arc<LiveKitRoomOrchestrator>,
     pub character_repo: Arc<dyn CharacterRepository>,
     pub social: Arc<SocialManager>,
+}
+
+/// Resolves a safe spawn position via `CollisionEngine`, resets movement state,
+/// and updates the player's position in `SpatialGrid`.
+pub fn apply_teleport(
+    grid: &SpatialGrid,
+    collision: &CollisionEngine,
+    character_id: i64,
+    target_x: f32,
+    target_y: f32,
+    chunk_size: f32,
+) -> Option<GridDelta> {
+    let (safe_x, safe_y) = collision.find_safe_spawn(
+        target_x as f64,
+        target_y as f64,
+        collision.player_half_size,
+        collision.player_half_size,
+    );
+    let new_pos = WorldPos::new(safe_x as f32, safe_y as f32);
+
+    if let Some(mut session) = grid.sessions.get_mut(&character_id) {
+        session.reset_movement_state();
+    }
+
+    grid.update_player_position(character_id, new_pos, chunk_size)
 }
 
 #[derive(Deserialize)]
@@ -146,34 +172,61 @@ async fn handle_socket(
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = ws_receiver.next().await {
             match msg {
-                // 60FPS Binary Data Plane: Movement (0x01) or Action (0x02)
+                // 60FPS Binary Data Plane: Input (0x01), Action (0x02), or Teleport (0x03)
                 Message::Binary(bin_bytes) => {
                     if let Ok(packet) = ClientBinaryPacket::decode(&bin_bytes) {
                         match packet {
-                            ClientBinaryPacket::Movement { pos_x, pos_y } => {
-                                let new_pos = WorldPos::new(pos_x, pos_y);
-                                if let Some(_delta) = state_clone.grid.update_player_position(
+                            ClientBinaryPacket::Input {
+                                seq,
+                                dx,
+                                dy,
+                                sprint,
+                                dt_ms,
+                            } => {
+                                if let Some(mut session) =
+                                    state_clone.grid.sessions.get_mut(&character_id)
+                                {
+                                    session.enqueue_input(QueuedInput {
+                                        seq,
+                                        dx,
+                                        dy,
+                                        sprint,
+                                        dt_ms,
+                                    });
+                                }
+                            }
+                            ClientBinaryPacket::Teleport { pos_x, pos_y } => {
+                                let chunk_size = state_clone.config.game_server.chunk_size as f32;
+                                if let Some(_delta) = apply_teleport(
+                                    &state_clone.grid,
+                                    &state_clone.collision,
                                     character_id,
-                                    new_pos,
-                                    state_clone.config.game_server.chunk_size as f32,
+                                    pos_x,
+                                    pos_y,
+                                    chunk_size,
                                 ) {
                                     // Chunk boundary crossed! Handle lazy audio room transition
-                                    let new_chunk = new_pos
-                                        .to_chunk(state_clone.config.game_server.chunk_size as f32);
-                                    let pop = state_clone
+                                    if let Some(new_chunk) = state_clone
                                         .grid
-                                        .chunk_players
-                                        .get(&new_chunk)
-                                        .map(|p| p.len())
-                                        .unwrap_or(1);
-                                    let _ = state_clone
-                                        .livekit
-                                        .handle_chunk_population_change(
-                                            character.shard_id,
-                                            new_chunk,
-                                            pop,
-                                        )
-                                        .await;
+                                        .sessions
+                                        .get(&character_id)
+                                        .map(|s| s.current_chunk)
+                                    {
+                                        let pop = state_clone
+                                            .grid
+                                            .chunk_players
+                                            .get(&new_chunk)
+                                            .map(|p| p.len())
+                                            .unwrap_or(1);
+                                        let _ = state_clone
+                                            .livekit
+                                            .handle_chunk_population_change(
+                                                character.shard_id,
+                                                new_chunk,
+                                                pop,
+                                            )
+                                            .await;
+                                    }
                                 }
                             }
                             ClientBinaryPacket::Action { action_id } => {
