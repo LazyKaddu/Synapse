@@ -4,8 +4,9 @@ pub mod rest;
 pub mod social;
 
 pub use binary::{
-    ClientBinaryPacket, ServerBinaryPacket, OPCODE_CLIENT_ACTION, OPCODE_CLIENT_MOVEMENT,
-    OPCODE_SERVER_ENTITY_DESPAWN, OPCODE_SERVER_ENTITY_SPAWN, OPCODE_SERVER_NEIGHBOR_MOVEMENT,
+    ClientBinaryPacket, ServerBinaryPacket, OPCODE_CLIENT_ACTION, OPCODE_CLIENT_INPUT,
+    OPCODE_CLIENT_TELEPORT, OPCODE_SERVER_ENTITY_DESPAWN, OPCODE_SERVER_ENTITY_SPAWN,
+    OPCODE_SERVER_NEIGHBOR_MOVEMENT, OPCODE_SERVER_PLAYER_STATE_ACK,
 };
 pub use prefab::{validate_prefab_payload, PrefabHeaderMeta};
 pub use rest::{

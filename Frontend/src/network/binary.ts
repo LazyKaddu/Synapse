@@ -3,15 +3,24 @@
 import { BinaryOpCode, type ServerBinaryPacket } from './opcodes.ts';
 
 /**
- * Encodes an upstream 60Hz client movement packet.
- * Wire Format: 9 Bytes [0x01: u8][pos_x: f32 LE][pos_y: f32 LE]
+ * Encodes an upstream 60Hz client input packet.
+ * Wire Format: 10 Bytes [0x01: u8][seq: u32 LE][dx: i8][dy: i8][flags: u8 (bit 0 = sprint)][dt_ms: u16 LE]
  */
-export function encodeClientMovement(posX: number, posY: number): Uint8Array {
-  const buffer = new ArrayBuffer(9);
+export function encodeClientInput(
+  seq: number,
+  dx: number,
+  dy: number,
+  sprint: boolean,
+  dtMs: number
+): Uint8Array {
+  const buffer = new ArrayBuffer(10);
   const view = new DataView(buffer);
-  view.setUint8(0, BinaryOpCode.CLIENT_MOVEMENT);
-  view.setFloat32(1, posX, true); // true = little-endian
-  view.setFloat32(5, posY, true);
+  view.setUint8(0, BinaryOpCode.CLIENT_INPUT);
+  view.setUint32(1, seq >>> 0, true);
+  view.setInt8(5, Math.max(-1, Math.min(1, Math.trunc(dx))));
+  view.setInt8(6, Math.max(-1, Math.min(1, Math.trunc(dy))));
+  view.setUint8(7, sprint ? 0x01 : 0x00);
+  view.setUint16(8, Math.max(0, Math.min(0xffff, Math.round(dtMs))), true);
   return new Uint8Array(buffer);
 }
 
@@ -23,8 +32,28 @@ export function encodeClientAction(actionId: number): Uint8Array {
   const buffer = new ArrayBuffer(5);
   const view = new DataView(buffer);
   view.setUint8(0, BinaryOpCode.CLIENT_ACTION);
-  view.setUint32(1, actionId, true);
+  view.setUint32(1, actionId >>> 0, true);
   return new Uint8Array(buffer);
+}
+
+/**
+ * Encodes an upstream client teleport request.
+ * Wire Format: 9 Bytes [0x03: u8][pos_x: f32 LE][pos_y: f32 LE]
+ */
+export function encodeClientTeleport(posX: number, posY: number): Uint8Array {
+  const buffer = new ArrayBuffer(9);
+  const view = new DataView(buffer);
+  view.setUint8(0, BinaryOpCode.CLIENT_TELEPORT);
+  view.setFloat32(1, posX, true);
+  view.setFloat32(5, posY, true);
+  return new Uint8Array(buffer);
+}
+
+/**
+ * @deprecated Use encodeClientTeleport or encodeClientInput.
+ */
+export function encodeClientMovement(posX: number, posY: number): Uint8Array {
+  return encodeClientTeleport(posX, posY);
 }
 
 /**
@@ -40,15 +69,21 @@ export function decodeServerBinaryPacket(buffer: ArrayBuffer): ServerBinaryPacke
 
   switch (opcode) {
     case BinaryOpCode.SERVER_NEIGHBOR_MOVEMENT: {
-      if (buffer.byteLength < 13) return null;
+      if (buffer.byteLength < 25) return null;
       const playerId = view.getUint32(1, true);
       const posX = view.getFloat32(5, true);
       const posY = view.getFloat32(9, true);
+      const velX = view.getFloat32(13, true);
+      const velY = view.getFloat32(17, true);
+      const serverTick = view.getUint32(21, true);
       return {
         kind: 'neighbor_movement',
         playerId,
         posX,
         posY,
+        velX,
+        velY,
+        serverTick,
       };
     }
 
@@ -75,6 +110,25 @@ export function decodeServerBinaryPacket(buffer: ArrayBuffer): ServerBinaryPacke
       return {
         kind: 'entity_despawn',
         entityId,
+      };
+    }
+
+    case BinaryOpCode.SERVER_PLAYER_STATE_ACK: {
+      if (buffer.byteLength < 25) return null;
+      const lastProcessedSeq = view.getUint32(1, true);
+      const posX = view.getFloat32(5, true);
+      const posY = view.getFloat32(9, true);
+      const velX = view.getFloat32(13, true);
+      const velY = view.getFloat32(17, true);
+      const serverTick = view.getUint32(21, true);
+      return {
+        kind: 'player_state_ack',
+        lastProcessedSeq,
+        posX,
+        posY,
+        velX,
+        velY,
+        serverTick,
       };
     }
 

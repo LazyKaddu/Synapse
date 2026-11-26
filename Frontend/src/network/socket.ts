@@ -1,7 +1,12 @@
 // GameSocket client managing WebSocket connection, binary stream, and social frames
 
 import { type ServerBinaryPacket, type SocialMessage } from './opcodes.ts';
-import { encodeClientMovement, encodeClientAction, decodeServerBinaryPacket } from './binary.ts';
+import {
+  encodeClientInput,
+  encodeClientTeleport,
+  encodeClientAction,
+  decodeServerBinaryPacket,
+} from './binary.ts';
 import { useSocialStore } from '../store/socialStore.ts';
 
 export type BinaryPacketCallback = (packet: ServerBinaryPacket) => void;
@@ -73,11 +78,23 @@ export class GameSocketClient {
     }
   }
 
-  sendMovement(posX: number, posY: number): void {
+  sendInput(seq: number, dx: number, dy: number, sprint: boolean, dtMs: number): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      const packet = encodeClientMovement(posX, posY);
+      const packet = encodeClientInput(seq, dx, dy, sprint, dtMs);
       this.ws.send(packet as unknown as BufferSource);
     }
+  }
+
+  sendTeleport(posX: number, posY: number): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      const packet = encodeClientTeleport(posX, posY);
+      this.ws.send(packet as unknown as BufferSource);
+    }
+  }
+
+  /** @deprecated Use sendTeleport or sendInput. */
+  sendMovement(posX: number, posY: number): void {
+    this.sendTeleport(posX, posY);
   }
 
   sendAction(actionId: number): void {

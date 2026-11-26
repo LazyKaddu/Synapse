@@ -1,233 +1,176 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+
+import { BinaryOpCode } from '../network/opcodes.ts';
 import {
-  BinaryParser,
-  PacketBuilder,
-  parsePacket,
-  createPacketBuilder,
-  validatePacket,
-  HEADER_SIZE,
-} from '../network/binary';
-import { OpCode, PacketHeader, HelloPacket, PlayerMovePacket, ChatMessagePacket } from '../network/opcodes';
+  encodeClientInput,
+  encodeClientAction,
+  encodeClientTeleport,
+  decodeServerBinaryPacket,
+} from '../network/binary.ts';
 
-describe('Binary Protocol', () => {
-  describe('PacketBuilder', () => {
-    let builder: ReturnType<typeof createPacketBuilder>;
-    let sequence = 0;
-
-    beforeEach(() => {
-      sequence = 0;
-      builder = createPacketBuilder(() => ++sequence);
-    });
-
-    it('should build a valid HELLO packet', () => {
-      const packet = builder.buildHello('1.0.0', 1);
-      
-      expect(packet.length).toBeGreaterThan(HEADER_SIZE);
-      expect(packet[0]).toBe(OpCode.HELLO);
-      
-      const parsed = parsePacket(packet.buffer);
-      expect(parsed.header.opcode).toBe(OpCode.HELLO);
-      expect(parsed.header.sequence).toBe(1);
-      expect(parsed.packet.clientVersion).toBe('1.0.0');
-      expect(parsed.packet.protocolVersion).toBe(1);
-    });
-
-    it('should build a valid AUTH_RESPONSE packet', () => {
-      const packet = builder.buildAuthResponse('char-123', 'auth-token-456');
-      
-      expect(packet[0]).toBe(OpCode.AUTH_RESPONSE);
-      
-      const parsed = parsePacket(packet.buffer);
-      expect(parsed.header.opcode).toBe(OpCode.AUTH_RESPONSE);
-      expect(parsed.packet.characterId).toBe('char-123');
-      expect(parsed.packet.response).toBe('auth-token-456');
-    });
-
-    it('should build a valid PLAYER_MOVE packet', () => {
-      const position = { x: 100, y: 64, z: -50 };
-      const velocity = { x: 5, y: 0, z: 2 };
-      const rotation = 1.57;
-      const inputFlags = 3; // Forward + Right
-      
-      const packet = builder.buildPlayerMove(position, velocity, rotation, inputFlags);
-      
-      expect(packet[0]).toBe(OpCode.PLAYER_MOVE);
-      expect(packet.length).toBe(HEADER_SIZE + 29); // 29 bytes payload
-      
-      const parsed = parsePacket(packet.buffer);
-      expect(parsed.header.opcode).toBe(OpCode.PLAYER_MOVE);
-      expect(parsed.packet.position).toEqual(position);
-      expect(parsed.packet.velocity).toEqual(velocity);
-      expect(parsed.packet.rotation).toBeCloseTo(rotation, 5);
-      expect(parsed.packet.inputFlags).toBe(inputFlags);
-    });
-
-    it('should build a valid CHAT_MESSAGE packet', () => {
-      const packet = builder.buildChatMessage(0, 'Hello World!');
-      
-      expect(packet[0]).toBe(OpCode.CHAT_MESSAGE);
-      
-      const parsed = parsePacket(packet.buffer);
-      expect(parsed.header.opcode).toBe(OpCode.CHAT_MESSAGE);
-      expect(parsed.packet.channel).toBe(0);
-      expect(parsed.packet.message).toBe('Hello World!');
-      expect(parsed.packet.targetId).toBeUndefined();
-    });
-
-    it('should build a CHAT_MESSAGE packet with target (whisper)', () => {
-      const packet = builder.buildChatMessage(4, 'Private message', 'target-123');
-      
-      const parsed = parsePacket(packet.buffer);
-      expect(parsed.packet.channel).toBe(4);
-      expect(parsed.packet.message).toBe('Private message');
-      expect(parsed.packet.targetId).toBe('target-123');
-    });
-
-    it('should build a valid PING packet', () => {
-      const packet = builder.buildPing();
-      
-      expect(packet.length).toBe(HEADER_SIZE);
-      expect(packet[0]).toBe(OpCode.PING);
-      
-      const parsed = parsePacket(packet.buffer);
-      expect(parsed.header.opcode).toBe(OpCode.PING);
-      expect(parsed.header.payloadLength).toBe(0);
-    });
-
-    it('should increment sequence for each packet', () => {
-      builder.buildPing();
-      builder.buildPing();
-      const packet = builder.buildPing();
-      
-      const parsed = parsePacket(packet.buffer);
-      expect(parsed.header.sequence).toBe(3);
+describe('Binary Protocol Wire Format', () => {
+  describe('BinaryOpCode constants', () => {
+    it('matches Rust backend opcodes', () => {
+      assert.strictEqual(BinaryOpCode.CLIENT_INPUT, 0x01);
+      assert.strictEqual(BinaryOpCode.CLIENT_ACTION, 0x02);
+      assert.strictEqual(BinaryOpCode.CLIENT_TELEPORT, 0x03);
+      assert.strictEqual(BinaryOpCode.SERVER_NEIGHBOR_MOVEMENT, 0x10);
+      assert.strictEqual(BinaryOpCode.SERVER_ENTITY_SPAWN, 0x11);
+      assert.strictEqual(BinaryOpCode.SERVER_ENTITY_DESPAWN, 0x12);
+      assert.strictEqual(BinaryOpCode.SERVER_PLAYER_STATE_ACK, 0x13);
     });
   });
 
-  describe('BinaryParser', () => {
-    it('should parse HELLO packet correctly', () => {
-      const builder = createPacketBuilder(() => 1);
-      const packet = builder.buildHello('1.0.0', 1);
-      
-      const parser = new BinaryParser(packet.buffer);
-      const parsed = parser.parse();
-      
-      expect(parsed.header.opcode).toBe(OpCode.HELLO);
-      expect(parsed.header.sequence).toBe(1);
-      expect((parsed.packet as HelloPacket).clientVersion).toBe('1.0.0');
-      expect((parsed.packet as HelloPacket).protocolVersion).toBe(1);
+  describe('encodeClientInput', () => {
+    it('encodes 10-byte CLIENT_INPUT packet with little-endian fields and signed i8 axes', () => {
+      const bytes = encodeClientInput(42, -1, 1, true, 17);
+      assert.strictEqual(bytes.byteLength, 10);
+
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      assert.strictEqual(view.getUint8(0), 0x01);
+      assert.strictEqual(view.getUint32(1, true), 42);
+      assert.strictEqual(view.getInt8(5), -1);
+      assert.strictEqual(view.getInt8(6), 1);
+      assert.strictEqual(view.getUint8(7), 0x01); // sprint bit 0 set
+      assert.strictEqual(view.getUint16(8, true), 17);
     });
 
-    it('should parse PLAYER_MOVE packet correctly', () => {
-      const builder = createPacketBuilder(() => 42);
-      const position = { x: 10.5, y: 64, z: -20.25 };
-      const velocity = { x: 0, y: 0, z: 0 };
-      const rotation = 0;
-      const inputFlags = 1;
-      
-      const packet = builder.buildPlayerMove(position, velocity, rotation, inputFlags);
-      const parser = new BinaryParser(packet.buffer);
-      const parsed = parser.parse();
-      
-      expect(parsed.header.opcode).toBe(OpCode.PLAYER_MOVE);
-      expect(parsed.header.sequence).toBe(42);
-      expect((parsed.packet as PlayerMovePacket).position).toEqual(position);
-      expect((parsed.packet as PlayerMovePacket).inputFlags).toBe(1);
-    });
+    it('encodes flags = 0 when sprint is false and handles large seq/dtMs', () => {
+      const bytes = encodeClientInput(0x12345678, 0, -1, false, 100);
+      assert.strictEqual(bytes.byteLength, 10);
 
-    it('should parse CHAT_MESSAGE packet correctly', () => {
-      const builder = createPacketBuilder(() => 100);
-      const packet = builder.buildChatMessage(0, 'Test message');
-      
-      const parser = new BinaryParser(packet.buffer);
-      const parsed = parser.parse();
-      
-      expect(parsed.header.opcode).toBe(OpCode.CHAT_MESSAGE);
-      expect(parsed.header.sequence).toBe(100);
-      expect((parsed.packet as ChatMessagePacket).channel).toBe(0);
-      expect((parsed.packet as ChatMessagePacket).message).toBe('Test message');
-    });
-
-    it('should throw error for buffer too small', () => {
-      const smallBuffer = new ArrayBuffer(5); // Less than HEADER_SIZE
-      const parser = new BinaryParser(smallBuffer);
-      
-      expect(() => parser.parseHeader()).toThrow('Buffer too small for header');
-    });
-
-    it('should return correct payload view', () => {
-      const builder = createPacketBuilder(() => 1);
-      const packet = builder.buildHello('1.0.0', 1);
-      
-      const parser = new BinaryParser(packet.buffer);
-      const payload = parser.getPayload();
-      
-      expect(payload.byteLength).toBe(packet.length - HEADER_SIZE);
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      assert.strictEqual(view.getUint8(0), 0x01);
+      assert.strictEqual(view.getUint32(1, true), 0x12345678);
+      assert.strictEqual(view.getInt8(5), 0);
+      assert.strictEqual(view.getInt8(6), -1);
+      assert.strictEqual(view.getUint8(7), 0x00);
+      assert.strictEqual(view.getUint16(8, true), 100);
     });
   });
 
-  describe('validatePacket', () => {
-    it('should return valid for correct packet', () => {
-      const builder = createPacketBuilder(() => 1);
-      const packet = builder.buildHello('1.0.0', 1);
-      
-      const result = validatePacket(packet.buffer);
-      expect(result.valid).toBe(true);
-    });
+  describe('encodeClientAction', () => {
+    it('encodes 5-byte CLIENT_ACTION packet', () => {
+      const bytes = encodeClientAction(987654);
+      assert.strictEqual(bytes.byteLength, 5);
 
-    it('should return invalid for too small packet', () => {
-      const smallBuffer = new ArrayBuffer(5);
-      const result = validatePacket(smallBuffer);
-      
-      expect(result.valid).toBe(false);
-      expect(result.error).toContain('too small');
-    });
-
-    it('should return invalid for too large packet', () => {
-      const largeBuffer = new ArrayBuffer(70000); // > MAX_PACKET_SIZE
-      const result = validatePacket(largeBuffer);
-      
-      expect(result.valid).toBe(false);
-      expect(result.error).toContain('too large');
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      assert.strictEqual(view.getUint8(0), 0x02);
+      assert.strictEqual(view.getUint32(1, true), 987654);
     });
   });
 
-  describe('parsePacket utility', () => {
-    it('should parse packet using utility function', () => {
-      const builder = createPacketBuilder(() => 999);
-      const packet = builder.buildPlayerMove(
-        { x: 0, y: 0, z: 0 },
-        { x: 0, y: 0, z: 0 },
-        0,
-        0
-      );
-      
-      const parsed = parsePacket(packet.buffer);
-      
-      expect(parsed.header.opcode).toBe(OpCode.PLAYER_MOVE);
-      expect(parsed.header.sequence).toBe(999);
+  describe('encodeClientTeleport', () => {
+    it('encodes 9-byte CLIENT_TELEPORT packet with f32 LE coordinates', () => {
+      const bytes = encodeClientTeleport(1234.5, -678.25);
+      assert.strictEqual(bytes.byteLength, 9);
+
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      assert.strictEqual(view.getUint8(0), 0x03);
+      assert.strictEqual(view.getFloat32(1, true), 1234.5);
+      assert.strictEqual(view.getFloat32(5, true), -678.25);
     });
   });
-});
 
-describe('OpCodes', () => {
-  it('should have all required opcodes', () => {
-    expect(OpCode.HELLO).toBe(0x00);
-    expect(OpCode.HELLO_ACK).toBe(0x01);
-    expect(OpCode.PING).toBe(0x02);
-    expect(OpCode.PONG).toBe(0x03);
-    expect(OpCode.AUTH_CHALLENGE).toBe(0x10);
-    expect(OpCode.AUTH_RESPONSE).toBe(0x11);
-    expect(OpCode.AUTH_SUCCESS).toBe(0x12);
-    expect(OpCode.PLAYER_MOVE).toBe(0x33);
-    expect(OpCode.CHAT_MESSAGE).toBe(0x50);
-    expect(OpCode.VOICE_JOIN).toBe(0x90);
-    expect(OpCode.SERVER_SHUTDOWN).toBe(0xF0);
-  });
+  describe('decodeServerBinaryPacket', () => {
+    it('decodes 25-byte SERVER_NEIGHBOR_MOVEMENT packet', () => {
+      const buf = new ArrayBuffer(25);
+      const view = new DataView(buf);
+      view.setUint8(0, BinaryOpCode.SERVER_NEIGHBOR_MOVEMENT);
+      view.setUint32(1, 77, true);
+      view.setFloat32(5, 320.5, true);
+      view.setFloat32(9, -128.25, true);
+      view.setFloat32(13, 240.0, true);
+      view.setFloat32(17, -120.0, true);
+      view.setUint32(21, 9001, true);
 
-  it('should have getOpCodeName helper', () => {
-    // Import the helper - it's not exported directly, so we test the enum values
-    expect(OpCode.HELLO).toBeDefined();
-    expect(typeof OpCode.HELLO).toBe('number');
+      const decoded = decodeServerBinaryPacket(buf);
+      assert.deepStrictEqual(decoded, {
+        kind: 'neighbor_movement',
+        playerId: 77,
+        posX: 320.5,
+        posY: -128.25,
+        velX: 240.0,
+        velY: -120.0,
+        serverTick: 9001,
+      });
+    });
+
+    it('returns null for truncated SERVER_NEIGHBOR_MOVEMENT packet', () => {
+      const buf = new ArrayBuffer(13);
+      new DataView(buf).setUint8(0, BinaryOpCode.SERVER_NEIGHBOR_MOVEMENT);
+      assert.strictEqual(decodeServerBinaryPacket(buf), null);
+    });
+
+    it('decodes 25-byte SERVER_PLAYER_STATE_ACK packet', () => {
+      const buf = new ArrayBuffer(25);
+      const view = new DataView(buf);
+      view.setUint8(0, BinaryOpCode.SERVER_PLAYER_STATE_ACK);
+      view.setUint32(1, 155, true);
+      view.setFloat32(5, 512.0, true);
+      view.setFloat32(9, 256.5, true);
+      view.setFloat32(13, 0.0, true);
+      view.setFloat32(17, 480.0, true);
+      view.setUint32(21, 1200, true);
+
+      const decoded = decodeServerBinaryPacket(buf);
+      assert.deepStrictEqual(decoded, {
+        kind: 'player_state_ack',
+        lastProcessedSeq: 155,
+        posX: 512.0,
+        posY: 256.5,
+        velX: 0.0,
+        velY: 480.0,
+        serverTick: 1200,
+      });
+    });
+
+    it('returns null for truncated SERVER_PLAYER_STATE_ACK packet', () => {
+      const buf = new ArrayBuffer(24);
+      new DataView(buf).setUint8(0, BinaryOpCode.SERVER_PLAYER_STATE_ACK);
+      assert.strictEqual(decodeServerBinaryPacket(buf), null);
+    });
+
+    it('decodes 18-byte SERVER_ENTITY_SPAWN packet', () => {
+      const buf = new ArrayBuffer(18);
+      const view = new DataView(buf);
+      view.setUint8(0, BinaryOpCode.SERVER_ENTITY_SPAWN);
+      view.setUint32(1, 1001, true);
+      view.setUint8(5, 2);
+      view.setFloat32(6, 64.0, true);
+      view.setFloat32(10, 128.0, true);
+      view.setFloat32(14, 100.0, true);
+
+      const decoded = decodeServerBinaryPacket(buf);
+      assert.deepStrictEqual(decoded, {
+        kind: 'entity_spawn',
+        entityId: 1001,
+        entityType: 2,
+        posX: 64.0,
+        posY: 128.0,
+        health: 100.0,
+      });
+    });
+
+    it('decodes 5-byte SERVER_ENTITY_DESPAWN packet', () => {
+      const buf = new ArrayBuffer(5);
+      const view = new DataView(buf);
+      view.setUint8(0, BinaryOpCode.SERVER_ENTITY_DESPAWN);
+      view.setUint32(1, 1001, true);
+
+      const decoded = decodeServerBinaryPacket(buf);
+      assert.deepStrictEqual(decoded, {
+        kind: 'entity_despawn',
+        entityId: 1001,
+      });
+    });
+
+    it('returns null for empty buffer or unknown opcode', () => {
+      assert.strictEqual(decodeServerBinaryPacket(new ArrayBuffer(0)), null);
+      const unknown = new ArrayBuffer(10);
+      new DataView(unknown).setUint8(0, 0xff);
+      assert.strictEqual(decodeServerBinaryPacket(unknown), null);
+    });
   });
 });
