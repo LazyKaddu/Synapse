@@ -2924,6 +2924,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "synapse-common",
+ "synapse-protocol",
  "synapse-spatial",
  "thiserror 2.0.21",
  "tokio",

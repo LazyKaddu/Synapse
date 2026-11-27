@@ -2,7 +2,10 @@ use axum::{
     routing::{any, get},
     Router,
 };
-use game_server::engine::{run_phone_subscriber, run_tick_loop, OutgoingMessage, SpatialGrid};
+use game_server::engine::{
+    run_phone_subscriber, run_social_subscriber, run_spatial_subscriber, run_tick_loop,
+    OutgoingMessage, PubSubContext, SpatialGrid,
+};
 use game_server::handler::{ws_handler, ServerState};
 use game_server::social::SocialManager;
 use std::net::SocketAddr;
@@ -13,9 +16,10 @@ use synapse_protocol::SocialMessage;
 use synapse_spatial::{CollisionEngine, WorldNoise};
 use synapse_storage::{
     CharacterRepository, ChatRepository, DbRouter, PgCharacterRepository, PgChatRepository,
-    RedisPresenceManager, RedisStateCache,
+    RedisPresenceManager, RedisPubSubBus, RedisStateCache,
 };
 use tower_http::cors::CorsLayer;
+use uuid::Uuid;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -46,16 +50,31 @@ async fn main() -> anyhow::Result<()> {
     let character_repo: Arc<dyn CharacterRepository> =
         Arc::new(PgCharacterRepository::new(router.clone()));
     let chat_repo: Arc<dyn ChatRepository> = Arc::new(PgChatRepository::new(router.clone()));
-    let social = Arc::new(SocialManager::new(chat_repo.clone()));
 
-    // 3. Redis Connections (State cache & Global presence)
+    // 3. Redis Connections (State cache, Global presence & Pub/Sub)
     let primary_redis = redis::Client::open(config.redis.primary_url.as_str())?;
     let primary_conn = redis::aio::ConnectionManager::new(primary_redis).await?;
     let cache = RedisStateCache::new(primary_conn);
 
     let global_redis = redis::Client::open(config.redis.global_presence_url.as_str())?;
     let global_conn = redis::aio::ConnectionManager::new(global_redis.clone()).await?;
-    let presence = RedisPresenceManager::new(global_conn, global_redis);
+    let presence = RedisPresenceManager::new(global_conn.clone(), global_redis.clone());
+
+    let pod_id = Uuid::new_v4().to_string();
+    let pubsub_bus = RedisPubSubBus::new(global_conn, global_redis);
+    let pubsub_ctx = PubSubContext {
+        publisher: Arc::new(pubsub_bus.clone()),
+        pod_id: pod_id.clone(),
+        region: config.server.region.clone(),
+        shard_id: config.server.shard_id,
+    };
+
+    let social = Arc::new(SocialManager::with_pubsub(
+        chat_repo.clone(),
+        pod_id.clone(),
+        config.server.region.clone(),
+        pubsub_ctx.publisher.clone(),
+    ));
 
     // 4. LiveKit SFU Room Orchestrator
     let livekit = Arc::new(LiveKitRoomOrchestrator::new(
@@ -79,6 +98,7 @@ async fn main() -> anyhow::Result<()> {
         livekit: livekit.clone(),
         character_repo: character_repo.clone(),
         social: social.clone(),
+        pubsub: Some(pubsub_ctx.clone()),
     };
 
     // 6. Spawn Background Tasks
@@ -87,8 +107,42 @@ async fn main() -> anyhow::Result<()> {
     let grid_clone = grid.clone();
     let cache_clone = cache.clone();
     let livekit_clone = livekit.clone();
+    let pubsub_for_tick = Some(pubsub_ctx.clone());
     tokio::spawn(async move {
-        run_tick_loop(config_clone, grid_clone, cache_clone, livekit_clone).await;
+        run_tick_loop(
+            config_clone,
+            grid_clone,
+            cache_clone,
+            livekit_clone,
+            pubsub_for_tick,
+        )
+        .await;
+    });
+
+    // Cross-Pod Spatial & Proximity Chat Pub/Sub Subscriber
+    let spatial_bus = pubsub_bus.clone();
+    let spatial_pod_id = pod_id.clone();
+    let spatial_region = config.server.region.clone();
+    let spatial_shard = config.server.shard_id;
+    let grid_for_spatial = grid.clone();
+    tokio::spawn(async move {
+        run_spatial_subscriber(
+            spatial_bus,
+            spatial_pod_id,
+            spatial_region,
+            spatial_shard,
+            grid_for_spatial,
+        )
+        .await;
+    });
+
+    // Cross-Pod Regional Social Messaging Pub/Sub Subscriber
+    let social_bus = pubsub_bus;
+    let social_pod_id = pod_id;
+    let social_region = config.server.region.clone();
+    let social_for_sub = social.clone();
+    tokio::spawn(async move {
+        run_social_subscriber(social_bus, social_pod_id, social_region, social_for_sub).await;
     });
 
     // Cross-Region Phone Call Pub/Sub Subscriber

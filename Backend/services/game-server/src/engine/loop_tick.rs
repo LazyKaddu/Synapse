@@ -1,4 +1,5 @@
 use crate::engine::grid::SpatialGrid;
+use crate::engine::pubsub::PubSubContext;
 use crate::engine::session::{OutgoingMessage, QueuedInput, MAX_INPUT_DT_MS};
 use std::sync::Arc;
 use std::time::Duration;
@@ -6,7 +7,7 @@ use synapse_common::AppConfig;
 use synapse_livekit::LiveKitRoomOrchestrator;
 use synapse_protocol::{ServerBinaryPacket, SocialMessage};
 use synapse_spatial::{AudioCuller, CollisionEngine, WorldNoise, WorldPos};
-use synapse_storage::{RedisStateCache, WarmPlayerState};
+use synapse_storage::{spatial_topic, RedisStateCache, SpatialPubSubEvent, WarmPlayerState};
 use tokio::time::interval;
 
 /// Simulates one 60Hz tick for all connected players and, on broadcast ticks,
@@ -147,11 +148,56 @@ pub fn simulate_and_broadcast_tick(
     }
 }
 
+/// Runs one 60Hz simulation tick and, when `publish_snapshots` is true (10Hz),
+/// sends local acks/neighbor broadcasts AND publishes `SpatialPubSubEvent::NeighborMovement`
+/// for remote pods in the same region/shard.
+pub async fn simulate_and_broadcast_tick_with_pubsub(
+    grid: &SpatialGrid,
+    collision: &CollisionEngine,
+    chunk_size: f32,
+    server_tick: u64,
+    publish_snapshots: bool,
+    pubsub: Option<&PubSubContext>,
+) {
+    let broadcast_interval = if publish_snapshots { 1 } else { u64::MAX };
+    simulate_and_broadcast_tick(grid, collision, server_tick, chunk_size, broadcast_interval);
+
+    if !publish_snapshots {
+        return;
+    }
+
+    let Some(ctx) = pubsub else {
+        return;
+    };
+
+    let topic = spatial_topic(&ctx.region, ctx.shard_id);
+    let tick_u32 = server_tick as u32;
+
+    for item in grid.sessions.iter() {
+        let session = item.value();
+        let event = SpatialPubSubEvent::NeighborMovement {
+            origin_pod_id: ctx.pod_id.clone(),
+            player_id: session.character_id as u32,
+            chunk_x: session.current_chunk.x,
+            chunk_y: session.current_chunk.y,
+            pos_x: session.position.x,
+            pos_y: session.position.y,
+            vel_x: session.velocity.x,
+            vel_y: session.velocity.y,
+            server_tick: tick_u32,
+        };
+        if let Ok(payload) = serde_json::to_string(&event) {
+            let _ = ctx.publisher.publish(&topic, &payload).await;
+        }
+    }
+}
+
 pub async fn run_tick_loop(
     config: Arc<AppConfig>,
     grid: Arc<SpatialGrid>,
     cache: RedisStateCache,
     _livekit: Arc<LiveKitRoomOrchestrator>,
+    pubsub: Option<PubSubContext>,
 ) {
     let tick_interval = Duration::from_micros(16_667); // 60Hz simulation
     let mut ticker = interval(tick_interval);
@@ -171,17 +217,21 @@ pub async fn run_tick_loop(
         ticker.tick().await;
         tick_counter += 1;
 
-        // 1. 60Hz physics/collision simulation & 10Hz snapshot broadcast
-        simulate_and_broadcast_tick(
+        // 1. 60Hz physics/collision simulation & 10Hz snapshot broadcast + Redis pub/sub fan-out
+        let publish_snapshots = tick_counter.is_multiple_of(broadcast_interval_ticks);
+        simulate_and_broadcast_tick_with_pubsub(
             &grid,
             &collision,
-            tick_counter,
             chunk_size,
-            broadcast_interval_ticks,
-        );
+            tick_counter,
+            publish_snapshots,
+            pubsub.as_ref(),
+        )
+        .await;
 
-        // 2. Periodic Warm State Flush to Redis (every 60 ticks / 1 second)
+        // 2. Periodic Warm State Flush to Redis & stale remote player prune (every 60 ticks / 1 second)
         if tick_counter.is_multiple_of(60) {
+            grid.prune_stale_remote_players(Duration::from_secs(5));
             for item in grid.sessions.iter() {
                 let session = item.value();
                 let warm_state = WarmPlayerState {
