@@ -8,7 +8,7 @@ use synapse_protocol::{
 };
 use synapse_storage::{
     models::{ChatGroupMemberRecord, ChatMessageRecord, FriendRequestRecord},
-    ChatRepository,
+    social_topic, ChatRepository, PubSubPublisher, SocialPubSubEvent,
 };
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -31,10 +31,18 @@ impl OnlinePlayer {
     }
 }
 
+#[derive(Clone)]
+struct SocialPubSubConfig {
+    pod_id: String,
+    region: String,
+    publisher: Arc<dyn PubSubPublisher>,
+}
+
 pub struct SocialManager {
     chat_repo: Arc<dyn ChatRepository>,
     online_players: Arc<DashMap<String, OnlinePlayer>>,
     known_usernames: Arc<DashMap<String, String>>,
+    pubsub: Option<SocialPubSubConfig>,
 }
 
 impl SocialManager {
@@ -43,6 +51,25 @@ impl SocialManager {
             chat_repo,
             online_players: Arc::new(DashMap::new()),
             known_usernames: Arc::new(DashMap::new()),
+            pubsub: None,
+        }
+    }
+
+    pub fn with_pubsub(
+        chat_repo: Arc<dyn ChatRepository>,
+        pod_id: String,
+        region: String,
+        publisher: Arc<dyn PubSubPublisher>,
+    ) -> Self {
+        Self {
+            chat_repo,
+            online_players: Arc::new(DashMap::new()),
+            known_usernames: Arc::new(DashMap::new()),
+            pubsub: Some(SocialPubSubConfig {
+                pod_id,
+                region,
+                publisher,
+            }),
         }
     }
 
@@ -69,12 +96,37 @@ impl SocialManager {
         None
     }
 
-    pub fn send_to_user(&self, query: &str, msg: &SocialMessage) -> bool {
+    /// Delivers a social message only to a player connected on this local pod.
+    pub fn deliver_local_user(&self, query: &str, msg: &SocialMessage) -> bool {
         if let Some(player) = self.find_online_player(query) {
             player.send_social_message(msg)
         } else {
             false
         }
+    }
+
+    pub fn send_to_user(&self, query: &str, msg: &SocialMessage) -> bool {
+        self.deliver_local_user(query, msg)
+    }
+
+    /// Delivers locally if the user is connected to this pod, otherwise publishes
+    /// to the regional Redis Pub/Sub social topic for delivery by the target's pod.
+    pub async fn send_to_user_routed(&self, query: &str, msg: &SocialMessage) -> bool {
+        if self.deliver_local_user(query, msg) {
+            return true;
+        }
+        if let Some(cfg) = &self.pubsub {
+            let event = SocialPubSubEvent::UserMessage {
+                origin_pod_id: cfg.pod_id.clone(),
+                target_user_id: query.to_string(),
+                message: msg.clone(),
+            };
+            if let Ok(payload) = serde_json::to_string(&event) {
+                let topic = social_topic(&cfg.region);
+                return cfg.publisher.publish(&topic, &payload).await.is_ok();
+            }
+        }
+        false
     }
 
     pub async fn on_player_connected(
@@ -110,7 +162,7 @@ impl SocialManager {
                 } else {
                     &f.user_a_id
                 };
-                self.send_to_user(friend_id, &status_msg);
+                self.send_to_user_routed(friend_id, &status_msg).await;
             }
         }
     }
@@ -129,7 +181,7 @@ impl SocialManager {
                 } else {
                     &f.user_a_id
                 };
-                self.send_to_user(friend_id, &status_msg);
+                self.send_to_user_routed(friend_id, &status_msg).await;
             }
         }
     }
@@ -243,10 +295,11 @@ impl SocialManager {
         let saved = self.chat_repo.save_friend_request(&record).await?;
         let dto = record_to_friend_request_dto(saved);
 
-        self.send_to_user(
+        self.send_to_user_routed(
             &resolved_target_id,
             &SocialMessage::FriendRequestReceived { request: dto },
-        );
+        )
+        .await;
 
         let _ = self.sync_friend_list(sender_id).await;
         let _ = self.sync_friend_list(&resolved_target_id).await;
@@ -273,20 +326,22 @@ impl SocialManager {
             let from_online = self.is_online(&req.from_user_id);
             let to_online = self.is_online(&req.to_user_id);
 
-            self.send_to_user(
+            self.send_to_user_routed(
                 &req.to_user_id,
                 &SocialMessage::FriendStatusUpdate {
                     user_id: req.from_user_id.clone(),
                     is_online: from_online,
                 },
-            );
-            self.send_to_user(
+            )
+            .await;
+            self.send_to_user_routed(
                 &req.from_user_id,
                 &SocialMessage::FriendStatusUpdate {
                     user_id: req.to_user_id.clone(),
                     is_online: to_online,
                 },
-            );
+            )
+            .await;
         }
         Ok(())
     }
@@ -334,14 +389,16 @@ impl SocialManager {
         let saved = self.chat_repo.save_message(&record).await?;
         let dto = record_to_chat_dto(saved);
 
-        self.send_to_user(
+        self.send_to_user_routed(
             &resolved_recipient_id,
             &SocialMessage::DirectMsgReceived {
                 message: dto.clone(),
             },
-        );
+        )
+        .await;
 
-        self.send_to_user(sender_id, &SocialMessage::DirectMsgReceived { message: dto });
+        self.send_to_user_routed(sender_id, &SocialMessage::DirectMsgReceived { message: dto })
+            .await;
 
         Ok(())
     }
@@ -395,14 +452,11 @@ impl SocialManager {
             created_at: group.created_at.map(|t| t.to_rfc3339()).unwrap_or_default(),
         };
 
-        self.send_to_user(
-            creator_id,
-            &SocialMessage::GroupCreated {
-                group: group_dto.clone(),
-            },
-        );
-
+        let created_msg = SocialMessage::GroupCreated {
+            group: group_dto.clone(),
+        };
         for m in &members {
+            self.send_to_user_routed(&m.user_id, &created_msg).await;
             let _ = self.sync_group_list(&m.user_id).await;
         }
 
@@ -437,7 +491,7 @@ impl SocialManager {
 
         let members = self.chat_repo.list_group_members(group_id).await?;
         for m in &members {
-            self.send_to_user(&m.user_id, &joined_msg);
+            self.send_to_user_routed(&m.user_id, &joined_msg).await;
             let _ = self.sync_group_list(&m.user_id).await;
         }
 
@@ -470,7 +524,7 @@ impl SocialManager {
 
         let members = self.chat_repo.list_group_members(group_id).await?;
         for m in members {
-            self.send_to_user(&m.user_id, &group_msg);
+            self.send_to_user_routed(&m.user_id, &group_msg).await;
         }
 
         Ok(())

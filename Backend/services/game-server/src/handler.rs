@@ -1,4 +1,4 @@
-use crate::engine::{OutgoingMessage, PlayerSession, QueuedInput, SpatialGrid};
+use crate::engine::{OutgoingMessage, PlayerSession, PubSubContext, QueuedInput, SpatialGrid};
 use crate::social::SocialManager;
 use axum::{
     extract::{
@@ -15,7 +15,9 @@ use synapse_common::{verify_boarding_pass, AppConfig};
 use synapse_livekit::LiveKitRoomOrchestrator;
 use synapse_protocol::{ClientBinaryPacket, SocialMessage};
 use synapse_spatial::{CollisionEngine, GridDelta, WorldPos};
-use synapse_storage::{CharacterRepository, RedisPresenceManager, RedisStateCache};
+use synapse_storage::{
+    spatial_topic, CharacterRepository, RedisPresenceManager, RedisStateCache, SpatialPubSubEvent,
+};
 use tokio::sync::mpsc;
 
 #[derive(Clone)]
@@ -28,6 +30,7 @@ pub struct ServerState {
     pub livekit: Arc<LiveKitRoomOrchestrator>,
     pub character_repo: Arc<dyn CharacterRepository>,
     pub social: Arc<SocialManager>,
+    pub pubsub: Option<PubSubContext>,
 }
 
 /// Resolves a safe spawn position via `CollisionEngine`, resets movement state,
@@ -257,10 +260,25 @@ async fn handle_socket(
                             } => {
                                 tracing::info!(channel = %channel, sender = %sender, content = %content, "Chat broadcast");
                                 if let Some(session) = state_clone.grid.sessions.get(&character_id) {
-                                    let subscribers = state_clone.grid.get_chunk_subscribers(session.current_chunk);
+                                    let chunk = session.current_chunk;
+                                    let subscribers = state_clone.grid.get_chunk_subscribers(chunk);
                                     for sub_id in subscribers {
                                         if let Some(sub_session) = state_clone.grid.sessions.get(&sub_id) {
                                             sub_session.send(OutgoingMessage::Text(json_str.clone()));
+                                        }
+                                    }
+                                    drop(session);
+
+                                    if let Some(ctx) = &state_clone.pubsub {
+                                        let event = SpatialPubSubEvent::ProximityChat {
+                                            origin_pod_id: ctx.pod_id.clone(),
+                                            chunk_x: chunk.x,
+                                            chunk_y: chunk.y,
+                                            payload_json: json_str.clone(),
+                                        };
+                                        if let Ok(payload) = serde_json::to_string(&event) {
+                                            let topic = spatial_topic(&ctx.region, ctx.shard_id);
+                                            let _ = ctx.publisher.publish(&topic, &payload).await;
                                         }
                                     }
                                 }
