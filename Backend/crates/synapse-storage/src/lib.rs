@@ -7,7 +7,11 @@ pub use models::{
     Account, Character, ChatGroupMemberRecord, ChatGroupRecord, ChatMessageRecord,
     FriendRequestRecord, FriendshipRecord, InventoryItem, PrefabRecord,
 };
-pub use redis::{RedisPresenceManager, RedisStateCache, WarmPlayerState};
+pub use redis::{
+    calls_topic, social_topic, spatial_topic, InMemoryPubSubBus, PubSubPublisher,
+    RedisPresenceManager, RedisPubSubBus, RedisStateCache, SocialPubSubEvent, SpatialPubSubEvent,
+    WarmPlayerState,
+};
 pub use repositories::{
     AccountRepository, CharacterRepository, ChatRepository, InMemoryChatRepository,
     InventoryRepository, PgAccountRepository, PgCharacterRepository, PgChatRepository,
