@@ -2,7 +2,15 @@ use crate::engine::session::PlayerSession;
 use dashmap::DashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use synapse_spatial::{AreaOfInterest, ChunkCoord, GridDelta, WorldPos};
+
+#[derive(Debug, Clone)]
+pub struct RemotePlayerState {
+    pub pos: WorldPos,
+    pub chunk: ChunkCoord,
+    pub last_seen: Instant,
+}
 
 pub struct SpatialGrid {
     // Maps character_id -> PlayerSession
@@ -11,6 +19,8 @@ pub struct SpatialGrid {
     pub chunk_players: Arc<DashMap<ChunkCoord, HashSet<i64>>>,
     // Maps ChunkCoord -> Set of character_ids subscribed to this chunk's AOI updates
     pub chunk_subscribers: Arc<DashMap<ChunkCoord, HashSet<i64>>>,
+    // Lightweight cache of players hosted on remote pods for AudioCuller
+    pub remote_players: Arc<DashMap<i64, RemotePlayerState>>,
 }
 
 impl Default for SpatialGrid {
@@ -25,7 +35,28 @@ impl SpatialGrid {
             sessions: Arc::new(DashMap::new()),
             chunk_players: Arc::new(DashMap::new()),
             chunk_subscribers: Arc::new(DashMap::new()),
+            remote_players: Arc::new(DashMap::new()),
         }
+    }
+
+    pub fn upsert_remote_player(&self, character_id: i64, pos: WorldPos, chunk: ChunkCoord) {
+        if self.sessions.contains_key(&character_id) {
+            return;
+        }
+        self.remote_players.insert(
+            character_id,
+            RemotePlayerState {
+                pos,
+                chunk,
+                last_seen: Instant::now(),
+            },
+        );
+    }
+
+    pub fn prune_stale_remote_players(&self, max_age: Duration) {
+        let now = Instant::now();
+        self.remote_players
+            .retain(|_, state| now.duration_since(state.last_seen) <= max_age);
     }
 
     pub fn insert_player(&self, session: PlayerSession) {
@@ -128,9 +159,10 @@ impl SpatialGrid {
             .unwrap_or_default()
     }
 
-    /// Gets candidate players located in chunks surrounding a center chunk
+    /// Gets candidate players located in chunks surrounding a center chunk (local + remote pods)
     pub fn get_nearby_candidates(&self, center: ChunkCoord) -> Vec<(u32, WorldPos)> {
         let grid = AreaOfInterest::get_3x3_grid(center);
+        let grid_set: HashSet<ChunkCoord> = grid.iter().copied().collect();
         let mut candidates = Vec::new();
 
         for c in grid {
@@ -140,6 +172,13 @@ impl SpatialGrid {
                         candidates.push((*id as u32, session.position));
                     }
                 }
+            }
+        }
+
+        for entry in self.remote_players.iter() {
+            let id = *entry.key();
+            if !self.sessions.contains_key(&id) && grid_set.contains(&entry.value().chunk) {
+                candidates.push((id as u32, entry.value().pos));
             }
         }
 
