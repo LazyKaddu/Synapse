@@ -47,52 +47,6 @@
 
 Synapse decouples high-frequency movement updates (TCP/Binary WebSockets) from heavy media streaming (UDP/WebRTC) and stateless HTTP requests.
 
-```mermaid
-flowchart TD
-    subgraph Client ["Frontend Client (Browser / WebGL)"]
-        PixiApp["PixiJS 8 WebGL Engine (60 FPS)"]
-        CullingPool["Loose Viewport Culling & SpritePool"]
-        LocalNoise["Deterministic Procedural Multi-Noise"]
-        AudioMixer["Web Audio API (Spatial Panner & Gain)"]
-        UIReact["React HUD / Modals (Zustand Stores)"]
-        SocketClient["GameSocketClient (Binary & JSON Demux)"]
-    end
-
-    subgraph Edge ["Ingress & In-Memory Transport"]
-        Gateway["Gateway REST Service (Axum)"]
-        LiveKitSFU["LiveKit SFU (WebRTC Audio Matrix)"]
-    end
-
-    subgraph StateCluster ["Stateful Core & Spatial Engine"]
-        GameServer["Game Server (Axum / Tokio / SpatialGrid)"]
-        Worker["Background Worker Daemon (Cron Jobs)"]
-    end
-
-    subgraph Storage ["Three-Tiered Persistence Matrix"]
-        RedisCluster[("Redis Cluster\nHot/Warm State & Pub/Sub Phonebook")]
-        PgBouncer["PgBouncer Connection Pooler"]
-        PostgresMaster[("PostgreSQL\nCold ACID Source of Truth")]
-    end
-
-    UIReact --> SocketClient
-    PixiApp --> CullingPool
-    PixiApp --> LocalNoise
-    SocketClient -->|Binary WS 60Hz| GameServer
-    SocketClient -->|JSON Social WS| GameServer
-    SocketClient -->|Auth / Boarding Pass| Gateway
-    LiveKitSFU <-->|UDP Tracks (Top 50)| AudioMixer
-
-    Gateway -->|Verify / Mint JWT| RedisCluster
-    Gateway -->|Cold Read| PgBouncer
-    GameServer -->|3x3 AOI Grid Diff| RedisCluster
-    GameServer -->|Room Minting / Culling| LiveKitSFU
-    GameServer -->|Periodic Warm Flush| RedisCluster
-    GameServer -->|Disconnect Cold Flush| PgBouncer
-    Worker -->|60s Cold State Flusher| RedisCluster
-    Worker -->|Batch Write| PgBouncer
-    PgBouncer --> PostgresMaster
-```
-
 ---
 
 ## The Three-Tiered State Pipeline
