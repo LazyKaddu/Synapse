@@ -30,7 +30,7 @@
 
 ## The Product Vision
 
-**Synapse** is a high-concurrency, horizontally scalable spatial MMO engine disguised as a 2D RPG. Designed to rival the social presence of platforms like VRChat or Gather.town combined with the mechanical depth of a traditional RPG, Synapse drops thousands of concurrent players into an infinitely expanding, procedurally generated universe running at a flawless **60 FPS directly inside modern web browsers** without requiring a single map file download.
+**Synapse** is a high-concurrency, horizontally scalable spatial MMO engine disguised as a 2D RPG. Designed to rival the social presence of platforms like VRChat or Gather.town combined with the mechanical depth of a traditional RPG, Synapse drops thousands of concurrent players into an infinitely expanding, procedurally generated universe running at a flawless **60 FPS directly inside modern web browsers** without requiring a single map file download. 
 
 ### Core Pillars
 
